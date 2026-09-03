@@ -12,6 +12,30 @@ if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   file(TOUCH_NOCREATE "C:/Users/jiten/Desktop/maxify/gaadimitra/android/app/.cxx/Debug/1y6k5s4k/armeabi-v7a/CMakeFiles/cmake.verify_globs")
 endif()
 
+# react_codegen_SRCS at C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/*.cpp")
+set(OLD_GLOB
+  "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/reactnativemmkv-generated.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "C:/Users/jiten/Desktop/maxify/gaadimitra/android/app/.cxx/Debug/1y6k5s4k/armeabi-v7a/CMakeFiles/cmake.verify_globs")
+endif()
+
+# react_codegen_SRCS at C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
+file(GLOB NEW_GLOB LIST_DIRECTORIES true "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/*.cpp")
+set(OLD_GLOB
+  "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/ComponentDescriptors.cpp"
+  "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/EventEmitters.cpp"
+  "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/Props.cpp"
+  "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/ShadowNodes.cpp"
+  "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/States.cpp"
+  )
+if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
+  message("-- GLOB mismatch!")
+  file(TOUCH_NOCREATE "C:/Users/jiten/Desktop/maxify/gaadimitra/android/app/.cxx/Debug/1y6k5s4k/armeabi-v7a/CMakeFiles/cmake.verify_globs")
+endif()
+
 # LIB_CUSTOM_SRCS at C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-safe-area-context/android/src/main/jni/CMakeLists.txt:12 (file)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "C:/Users/jiten/Desktop/maxify/gaadimitra/node_modules/react-native-safe-area-context/android/src/main/jni/*.cpp")
 set(OLD_GLOB

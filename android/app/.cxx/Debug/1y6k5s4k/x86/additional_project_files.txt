@@ -1,0 +1,6 @@
+C:\Users\jiten\Desktop\maxify\gaadimitra\android\app\.cxx\Debug\1y6k5s4k\x86\reactnativemmkv_autolinked_build\CMakeFiles\react_codegen_reactnativemmkv.dir\react\renderer\components\reactnativemmkv\ComponentDescriptors.cpp.o
+C:\Users\jiten\Desktop\maxify\gaadimitra\android\app\.cxx\Debug\1y6k5s4k\x86\reactnativemmkv_autolinked_build\CMakeFiles\react_codegen_reactnativemmkv.dir\react\renderer\components\reactnativemmkv\EventEmitters.cpp.o
+C:\Users\jiten\Desktop\maxify\gaadimitra\android\app\.cxx\Debug\1y6k5s4k\x86\reactnativemmkv_autolinked_build\CMakeFiles\react_codegen_reactnativemmkv.dir\react\renderer\components\reactnativemmkv\Props.cpp.o
+C:\Users\jiten\Desktop\maxify\gaadimitra\android\app\.cxx\Debug\1y6k5s4k\x86\reactnativemmkv_autolinked_build\CMakeFiles\react_codegen_reactnativemmkv.dir\react\renderer\components\reactnativemmkv\ShadowNodes.cpp.o
+C:\Users\jiten\Desktop\maxify\gaadimitra\android\app\.cxx\Debug\1y6k5s4k\x86\reactnativemmkv_autolinked_build\CMakeFiles\react_codegen_reactnativemmkv.dir\react\renderer\components\reactnativemmkv\States.cpp.o
+C:\Users\jiten\Desktop\maxify\gaadimitra\android\app\.cxx\Debug\1y6k5s4k\x86\reactnativemmkv_autolinked_build\CMakeFiles\react_codegen_reactnativemmkv.dir\reactnativemmkv-generated.cpp.o

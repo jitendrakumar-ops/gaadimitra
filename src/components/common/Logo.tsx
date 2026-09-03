@@ -16,7 +16,7 @@ export const Logo: React.FC<LogoProps> = ({ size = 'md', showSubtitle = true }) 
   return (
     <View className="items-center justify-center my-4">
       {/* Brand Icon Badge */}
-      <View className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-100 items-center justify-center shadow-sm mb-3">
+      <View className="w-16 h-16 rounded-xl bg-blue-50 border border-blue-100 items-center justify-center shadow-sm mb-3">
         <CarBadgeIcon size={iconSize} color="#2563EB" />
       </View>
 
