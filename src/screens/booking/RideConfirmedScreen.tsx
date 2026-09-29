@@ -16,54 +16,73 @@ import { CheckCircleIcon, ArrowRightIcon } from '../../assets/icons/Icons';
 import { ridesService } from '../../services/rides';
 import { useTheme } from '../../theme';
 
+import { useAppSelector } from '../../store';
+
 export const RideConfirmedScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<RideConfirmedScreenNavigationProp>();
   const route = useRoute<RideConfirmedScreenRouteProp>();
 
-  const driver: DriverInfo = route.params?.driver || {
-    id: 'drv_1',
-    name: 'Rahul Kumar',
-    phone: '+919876543210',
-    rating: '4.8',
-    totalRides: 286,
-    experienceYears: 5,
-    distance: '1.2 km away',
-    isVerified: true,
-    vehicleModel: 'Maruti Dzire',
-    vehicleType: 'Car',
-    vehiclePlate: 'BR01AB1234',
-    hasAc: true,
-    seatingCapacity: '4 Seats',
-    pricePerKm: '₹14 / km',
-  };
+  const { selectedDriver } = useAppSelector((state) => state.drivers);
 
-  const agreedFare = route.params?.agreedFare || 1500;
-  const bookingToken = route.params?.bookingToken || 200;
-  const bookingId = route.params?.bookingId || '#RIDE10245';
+  const driver: DriverInfo | null = React.useMemo(() => {
+    if (route.params?.driver) {
+      return route.params.driver;
+    }
+    if (selectedDriver) {
+      const vehicle = typeof selectedDriver.vehicleId === 'object' ? selectedDriver.vehicleId : null;
+      return {
+        id: selectedDriver._id || selectedDriver.id || '',
+        name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
+        phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
+        profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
+        rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
+        totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
+        experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,
+        distance: selectedDriver.distanceKm ? `${selectedDriver.distanceKm} km away` : 'Nearby',
+        isVerified: Boolean(selectedDriver.isVerified ?? true),
+        vehicleModel: selectedDriver.vehicleModel || 'Vehicle',
+        vehicleType: selectedDriver.type || vehicle?.type || 'Car',
+        vehiclePlate: selectedDriver.vehicleNo || 'Not Registered',
+        hasAc: Boolean(selectedDriver.type),
+        seatingCapacity: selectedDriver.seating ?? `${selectedDriver.seating} Seats`,
+        driverVehicleImg: selectedDriver.vehicleImages,
+        vehicleImage: (selectedDriver.vehicleImages && selectedDriver.vehicleImages.length > 0)
+          ? selectedDriver.vehicleImages[0]
+          : (vehicle?.image || null),
+      };
+    }
+    return null;
+  }, [route.params?.driver, selectedDriver]);
+
+  const agreedFare = route.params?.agreedFare || 0;
+  const bookingToken = route.params?.bookingToken || 0;
+  const bookingId = route.params?.bookingId || `#RIDE${Date.now().toString().slice(-5)}`;
 
   const tripInfo: TripInfoData = route.params?.tripInfo || {
-    pickupLocation: 'Patna Junction',
-    destination: 'Gaya',
-    date: '15 Aug 2026',
-    pickupTime: '5:00 PM',
-    passengers: '4 People',
-    vehicleModel: driver.vehicleModel || 'Maruti Dzire',
+    pickupLocation: '',
+    destination: '',
+    date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+    pickupTime: new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }),
+    passengers: driver?.seatingCapacity || '4 Seats',
+    vehicleModel: driver?.vehicleModel || '',
   };
 
   useEffect(() => {
-    // Save to My Rides list with active status
-    ridesService.saveRide({
-      bookingId,
-      driver,
-      tripInfo,
-      agreedFare,
-      bookingToken,
-      status: 'active',
-    });
-  }, []);
+    if (driver) {
+      ridesService.saveRide({
+        bookingId,
+        driver,
+        tripInfo,
+        agreedFare,
+        bookingToken,
+        status: 'active',
+      });
+    }
+  }, [driver, bookingId, tripInfo, agreedFare, bookingToken]);
 
   const handleViewMyRide = () => {
+    if (!driver) return;
     navigation.navigate('RideDetails', {
       driver,
       agreedFare,
@@ -79,6 +98,31 @@ export const RideConfirmedScreen: React.FC = () => {
       routes: [{ name: 'HomeDashboard' }],
     });
   };
+
+  if (!driver) {
+    return (
+      <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.background}
+        />
+        <HeaderBar onBackPress={() => navigation.goBack()} />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text style={{ color: colors.text }} className="text-base font-bold text-center">
+            Ride confirmation information not available
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate('HomeDashboard', {})}
+            style={{ backgroundColor: colors.primary }}
+            className="mt-4 px-6 py-2.5 rounded-xl"
+          >
+            <Text className="text-white font-bold text-sm">Go to Home</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-between">

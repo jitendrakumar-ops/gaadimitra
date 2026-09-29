@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
 
 react {
     autolinkLibrariesWithApp()
@@ -48,5 +49,17 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+}
+
+task reverseTcpPorts(type: Exec) {
+    description 'Reverse tcp ports for backend server'
+    commandLine 'adb', 'reverse', 'tcp:5001', 'tcp:5001'
+    ignoreExitValue true
+}
+
+afterEvaluate {
+    tasks.matching { it.name.startsWith("install") }.configureEach {
+        it.finalizedBy reverseTcpPorts
     }
 }

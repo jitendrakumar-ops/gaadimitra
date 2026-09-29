@@ -27,8 +27,10 @@ import {
   ShieldSafetyIcon,
   StarFilledGraphic,
 } from '../../assets/icons/Icons';
-import { ridesService } from '../../services/rides';
+import { HeaderBar } from '../../components/common/HeaderBar';
 import { useTheme } from '../../theme';
+import { ridesService } from '../../services/rides';
+import { toast } from '../../components/common/ToastNotification';
 
 interface ComplimentTag {
   id: string;
@@ -117,17 +119,11 @@ export const RateRideScreen: React.FC = () => {
 
   const handleSubmitRating = () => {
     ridesService.updateRideStatus(bookingId, 'completed');
-    Alert.alert('Thank You!', `Your rating for ${driver.name} has been submitted.`, [
-      {
-        text: 'OK',
-        onPress: () => {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'HomeDashboard' }],
-          });
-        },
-      },
-    ]);
+    toast.showSuccess(`Your rating for ${driver.name} has been submitted.`, 'Thank You!');
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'HomeDashboard' }],
+    });
   };
 
   const handleSkip = () => {

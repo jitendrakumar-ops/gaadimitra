@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,20 +11,27 @@ import {
   Platform,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { LocationPermissionNavigationProp } from '../../types/navigation';
 import { HeaderBar } from '../../components/common/HeaderBar';
-import { LocationIllustration } from '../../components/illustrations/LocationIllustration';
 import { Button } from '../../components/common/Button';
 import {
   LocationMarkerIcon,
   SearchIcon,
-  CheckCircleIcon,
+  ChevronRightIcon,
 } from '../../assets/icons/Icons';
-import { detectCurrentLocationWithGps } from '../../utils/mapConfig';
+import {
+  detectCurrentLocationWithGps,
+  searchPlacesWithGoogle,
+  getPlaceCoordinates,
+  geocodeAddress,
+  PlacePrediction,
+} from '../../utils/mapConfig';
 import { useTheme } from '../../theme';
+import { storageService } from '../../services/storage';
 
 export const LocationPermissionScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
@@ -32,69 +39,80 @@ export const LocationPermissionScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+  const [placePredictions, setPlacePredictions] = useState<PlacePrediction[]>([]);
 
-  const allCities = [
-    { name: 'Patna Junction, Patna', state: 'Bihar', isPopular: true },
-    { name: 'Bailey Road, Patna', state: 'Bihar', isPopular: true },
-    { name: 'Kankarbagh, Patna', state: 'Bihar', isPopular: true },
-    { name: 'Boring Road, Patna', state: 'Bihar', isPopular: true },
-    { name: 'Patna Airport (PAT)', state: 'Bihar', isPopular: true },
-    { name: 'Gaya Junction, Gaya', state: 'Bihar' },
-    { name: 'Muzaffarpur City', state: 'Bihar' },
-    { name: 'Bhagalpur Station', state: 'Bihar' },
-    { name: 'Darbhanga Airport', state: 'Bihar' },
-    { name: 'Connaught Place, New Delhi', state: 'Delhi NCR', isPopular: true },
-    { name: 'IGI Airport T3, New Delhi', state: 'Delhi NCR' },
-    { name: 'Sector 18, Noida', state: 'Uttar Pradesh', isPopular: true },
-    { name: 'Hazratganj, Lucknow', state: 'Uttar Pradesh', isPopular: true },
-    { name: 'Charbagh Station, Lucknow', state: 'Uttar Pradesh' },
-    { name: 'Varanasi Cantt, Varanasi', state: 'Uttar Pradesh' },
-    { name: 'Ranchi Main Road', state: 'Jharkhand' },
-    { name: 'Bistupur, Jamshedpur', state: 'Jharkhand' },
-    { name: 'Koramangala, Bengaluru', state: 'Karnataka' },
-    { name: 'Andheri East, Mumbai', state: 'Maharashtra' },
-    { name: 'Salt Lake, Kolkata', state: 'West Bengal' },
-  ];
-
-  const filteredCities = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return allCities;
+  // Dynamic Google Places autocomplete search with debounce (no static/default list)
+  useEffect(() => {
+    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+      setPlacePredictions([]);
+      setIsSearchingPlaces(false);
+      return;
     }
-    const query = searchQuery.toLowerCase().trim();
-    return allCities.filter(
-      city =>
-        city.name.toLowerCase().includes(query) ||
-        city.state.toLowerCase().includes(query)
-    );
-  }, [searchQuery, allCities]);
+
+    setIsSearchingPlaces(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchPlacesWithGoogle(searchQuery.trim());
+        setPlacePredictions(results);
+      } catch (err) {
+        console.warn('Google Places autocomplete search error:', err);
+      } finally {
+        setIsSearchingPlaces(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const handleAllowLocation = async () => {
     setIsLoading(true);
     try {
       const geoResult = await detectCurrentLocationWithGps();
       setIsLoading(false);
-      navigation.replace('HomeDashboard', {
-        selectedCity: geoResult.shortLocation,
-      });
+      if (geoResult?.shortLocation && geoResult.shortLocation !== 'Current Location') {
+        storageService.setString('user_selected_city', geoResult.shortLocation);
+        navigation.replace('HomeDashboard', {
+          selectedCity: geoResult.shortLocation,
+        });
+      } else {
+        // If GPS couldn't resolve text address, prompt user to search or confirm
+        setIsModalVisible(true);
+      }
     } catch (error) {
       setIsLoading(false);
-      navigation.replace('HomeDashboard', {
-        selectedCity: 'Patna Junction, Patna',
-      });
+      setIsModalVisible(true);
     }
   };
 
-  const handleSelectCity = (cityName: string) => {
+  const handleSelectPrediction = async (prediction: PlacePrediction) => {
+    const cityName = prediction.description;
     setIsModalVisible(false);
     setSearchQuery('');
+    setPlacePredictions([]);
+    storageService.setString('user_selected_city', cityName);
+
+    // Resolve and save coordinates dynamically
+    getPlaceCoordinates(prediction.placeId, cityName);
+
     navigation.replace('HomeDashboard', {
       selectedCity: cityName,
     });
   };
 
-  const handleCustomCitySubmit = () => {
+  const handleCustomCitySubmit = async () => {
     if (searchQuery.trim().length > 0) {
-      handleSelectCity(searchQuery.trim());
+      const query = searchQuery.trim();
+      setIsModalVisible(false);
+      setSearchQuery('');
+      setPlacePredictions([]);
+      storageService.setString('user_selected_city', query);
+
+      geocodeAddress(query);
+
+      navigation.replace('HomeDashboard', {
+        selectedCity: query,
+      });
     }
   };
 
@@ -130,7 +148,7 @@ export const LocationPermissionScreen: React.FC = () => {
       {/* Bottom CTAs */}
       <View className="px-6 pb-8 space-y-3">
         <Button
-          title={isLoading ? "Detecting GPS Location..." : "Allow Location"}
+          title={isLoading ? 'Detecting GPS Location...' : 'Allow Location'}
           variant="primary"
           size="lg"
           loading={isLoading}
@@ -151,7 +169,7 @@ export const LocationPermissionScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Searchable Manual City Selector Modal */}
+      {/* Dynamic Searchable Location Selector Modal via Google Places API */}
       <Modal
         visible={isModalVisible}
         animationType="slide"
@@ -170,16 +188,17 @@ export const LocationPermissionScreen: React.FC = () => {
             >
               <View>
                 <Text style={{ color: colors.text }} className="text-lg font-bold">
-                  Select Your City / Pickup
+                  Select Your Pickup Location
                 </Text>
                 <Text style={{ color: colors.textSecondary }} className="text-xs mt-0.5">
-                  Search by city name, area, or landmark
+                  Search live on Google Maps by city, area, or landmark
                 </Text>
               </View>
               <TouchableOpacity
                 onPress={() => {
                   setIsModalVisible(false);
                   setSearchQuery('');
+                  setPlacePredictions([]);
                 }}
                 style={{ backgroundColor: colors.surface }}
                 className="p-1.5 rounded-full"
@@ -208,97 +227,118 @@ export const LocationPermissionScreen: React.FC = () => {
                 style={{ color: colors.text }}
                 className="flex-1 ml-2.5 text-sm font-semibold h-full p-0"
               />
-              {searchQuery.length > 0 && (
+              {isSearchingPlaces ? (
+                <ActivityIndicator size="small" color={colors.primary} className="mr-1" />
+              ) : searchQuery.length > 0 ? (
                 <TouchableOpacity
-                  onPress={() => setSearchQuery('')}
+                  onPress={() => {
+                    setSearchQuery('');
+                    setPlacePredictions([]);
+                  }}
                   className="p-1"
                 >
                   <Text style={{ color: colors.placeholder }} className="text-xs font-bold">✕</Text>
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
 
-            {/* Quick Option: Use Current Location */}
+            {/* Quick Option: Use Current GPS Location */}
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={handleAllowLocation}
+              disabled={isLoading}
               style={{
                 backgroundColor: `${colors.primary}15`,
                 borderColor: `${colors.primary}30`,
               }}
-              className="flex-row items-center p-3 mb-2 rounded-xl border"
+              className="flex-row items-center p-3 mb-3 rounded-xl border"
             >
               <View style={{ backgroundColor: colors.primary }} className="w-8 h-8 rounded-full items-center justify-center mr-2.5">
-                <LocationMarkerIcon size={16} color="#FFFFFF" />
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <LocationMarkerIcon size={16} color="#FFFFFF" />
+                )}
               </View>
               <View className="flex-1">
                 <Text style={{ color: colors.primary }} className="text-xs font-bold">
-                  Use Current GPS Location
+                  {isLoading ? 'Detecting GPS Location via Google Maps...' : 'Use Current GPS Location'}
                 </Text>
                 <Text style={{ color: colors.textSecondary }} className="text-[11px]">
-                  Detect via GPS & Google Geocoding
+                  Detect live GPS coordinates & reverse geocode
                 </Text>
               </View>
             </TouchableOpacity>
 
-            {/* Custom Location Option if searched text has no exact match */}
-            {searchQuery.trim().length > 0 && (
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={handleCustomCitySubmit}
-                className="flex-row items-center p-3 mb-2 rounded-xl bg-emerald-50 border border-emerald-200"
+            {/* Scrollable Live Results List */}
+            {searchQuery.trim().length >= 2 ? (
+              <ScrollView
+                className="mt-1"
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
               >
-                <CheckCircleIcon size={18} color="#059669" />
-                <View className="ml-2.5 flex-1">
-                  <Text className="text-xs font-bold text-emerald-800">
-                    Use entered location: "{searchQuery.trim()}"
-                  </Text>
-                  <Text className="text-[10px] text-emerald-600">
-                    Tap to select this custom pickup area
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            )}
-
-            {/* Scrollable Results List */}
-            <ScrollView
-              className="mt-1"
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {filteredCities.map((city, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  activeOpacity={0.7}
-                  onPress={() => handleSelectCity(city.name)}
-                  style={{ borderBottomColor: colors.border }}
-                  className="flex-row items-center py-3.5 px-2 border-b"
-                >
-                  <LocationMarkerIcon size={18} color={colors.primary} />
-                  <View className="ml-3 flex-1">
-                    <Text style={{ color: colors.text }} className="text-sm font-bold">
-                      {city.name}
+                {isSearchingPlaces && placePredictions.length === 0 ? (
+                  <View className="py-8 items-center justify-center">
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold mt-2">
+                      Searching Google Maps...
                     </Text>
-                    <Text style={{ color: colors.textSecondary }} className="text-xs">{city.state}</Text>
                   </View>
-                  {city.isPopular && !searchQuery && (
-                    <View style={{ backgroundColor: colors.surface }} className="px-2 py-0.5 rounded-full">
-                      <Text style={{ color: colors.textSecondary }} className="text-[10px] font-semibold">
-                        Popular
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-
-              {filteredCities.length === 0 && searchQuery.trim().length === 0 && (
-                <View className="items-center py-8">
-                  <Text style={{ color: colors.placeholder }} className="text-xs">
-                    No matching cities found. Type above to enter custom location.
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
+                ) : placePredictions.length === 0 ? (
+                  <View className="py-6 items-center justify-center px-4">
+                    <Text style={{ color: colors.textSecondary }} className="text-xs text-center mb-3">
+                      No Google Maps results found for "{searchQuery.trim()}".
+                    </Text>
+                    <TouchableOpacity
+                      onPress={handleCustomCitySubmit}
+                      style={{ backgroundColor: colors.primary }}
+                      className="px-5 py-2.5 rounded-xl"
+                    >
+                      <Text className="text-white text-xs font-bold">Use "{searchQuery.trim()}" directly</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={{ color: colors.textSecondary }} className="text-[11px] font-bold uppercase tracking-wider mb-2 px-1">
+                      Google Maps Suggestions
+                    </Text>
+                    {placePredictions.map(pred => (
+                      <TouchableOpacity
+                        key={pred.placeId}
+                        activeOpacity={0.7}
+                        onPress={() => handleSelectPrediction(pred)}
+                        style={{ borderBottomColor: colors.border }}
+                        className="flex-row items-center py-3 px-2 border-b rounded-lg"
+                      >
+                        <View
+                          style={{ backgroundColor: `${colors.primary}15` }}
+                          className="w-8 h-8 rounded-full items-center justify-center mr-3"
+                        >
+                          <LocationMarkerIcon size={16} color={colors.primary} />
+                        </View>
+                        <View className="flex-1 pr-2">
+                          <Text style={{ color: colors.text }} className="text-sm font-bold" numberOfLines={1}>
+                            {pred.mainText}
+                          </Text>
+                          {pred.secondaryText ? (
+                            <Text style={{ color: colors.textSecondary }} className="text-xs mt-0.5" numberOfLines={1}>
+                              {pred.secondaryText}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <ChevronRightIcon size={14} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+              </ScrollView>
+            ) : (
+              <View className="py-8 items-center justify-center px-4">
+                <Text style={{ color: colors.textSecondary }} className="text-xs text-center leading-relaxed">
+                  Type 2 or more characters to search any city, landmark, or area in India live on Google Maps.
+                </Text>
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>

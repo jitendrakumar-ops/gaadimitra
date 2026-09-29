@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,12 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  BackHandler,
+  Alert,
+  Image,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -25,49 +31,449 @@ import { FareSummaryTable } from '../../components/booking/FareSummaryTable';
 import { InfoNoteBox } from '../../components/booking/InfoNoteBox';
 import { CheckCircleIcon, LockFilledIcon, CarBadgeIcon, ClockOutlineIcon, CrossCircleIcon } from '../../assets/icons/Icons';
 import { useTheme } from '../../theme';
+import { ridesService } from '../../services/rides';
+import { bookingService } from '../../services/bookingService';
+import { notificationService } from '../../services/notificationService';
+import { useAppDispatch, useAppSelector, setActiveRide, updateActiveRideStatus, cancelBooking, payBookingToken } from '../../store';
+import { toast } from '../../components/common/ToastNotification';
+
+const CANCEL_REASONS = [
+  'Driver is taking too long',
+  'Driver asked to cancel',
+  'Changed my mind / No longer needed',
+  'Selected wrong pickup or drop location',
+  'Found another vehicle / cab',
+  'Other',
+];
 
 export const DriverAcceptedScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<DriverAcceptedScreenNavigationProp>();
   const route = useRoute<DriverAcceptedScreenRouteProp>();
+  const dispatch = useAppDispatch();
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [selectedMethod, setSelectedMethod] = useState<'upi' | 'card' | 'wallet'>('upi');
-  const [isDriverAccepted, setIsDriverAccepted] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [selectedReason, setSelectedReason] = useState(CANCEL_REASONS[0]);
+  const [otherReason, setOtherReason] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  const initialStatus = ((route.params as any)?.status || 'requested').toLowerCase();
+  const [currentStatus, setCurrentStatus] = useState<string>(initialStatus);
+  const [liveBookingData, setLiveBookingData] = useState<any>(null);
+
+  const isDriverAccepted =
+    currentStatus !== 'requested' &&
+    currentStatus !== 'pending' &&
+    currentStatus !== '' &&
+    currentStatus !== 'cancelled' &&
+    currentStatus !== 'rejected';
+
   const pulseAnimation = useRef(new Animated.Value(0)).current;
 
-  const driver: DriverInfo = route.params?.driver || {
-    id: 'drv_1',
-    name: 'Rahul Kumar',
-    phone: '+919876543210',
-    rating: '4.8',
-    totalRides: 286,
-    experienceYears: 5,
-    distance: '1.2 km away',
-    isVerified: true,
-    vehicleModel: 'Maruti Dzire',
-    vehicleType: 'Car',
-    vehiclePlate: 'BR01AB1234',
-    hasAc: true,
-    seatingCapacity: '4 Seats',
-    pricePerKm: '₹14 / km',
-  };
+  const { selectedDriver } = useAppSelector((state) => state.drivers);
+  const { activeBooking, currentBooking } = useAppSelector((state) => state.bookings);
 
-  const agreedFare = route.params?.agreedFare || 1500;
-  const bookingToken = route.params?.bookingToken || 200;
+  const rawBookingId =
+    route.params?.bookingId ||
+    activeBooking?._id ||
+    activeBooking?.id ||
+    currentBooking?._id ||
+    currentBooking?.id ||
+    '';
+  const bookingId = rawBookingId || `#RIDE${Date.now().toString().slice(-5)}`;
+
+  const driver: DriverInfo | null = React.useMemo(() => {
+    // 1. Check if backend returned populated driver in live booking
+    const backendDriver =
+      typeof liveBookingData?.driverId === 'object' && liveBookingData?.driverId !== null
+        ? liveBookingData.driverId
+        : null;
+
+    if (backendDriver) {
+      const vehicle = typeof backendDriver.vehicleId === 'object' ? backendDriver.vehicleId : null;
+      const vehicleImg =
+        backendDriver.vehicleImage ||
+        (Array.isArray(backendDriver.vehicleImages) && backendDriver.vehicleImages.length > 0 ? backendDriver.vehicleImages[0] : null) ||
+        vehicle?.image ||
+        (typeof backendDriver.driverVehicleImg === 'string' ? backendDriver.driverVehicleImg : null);
+
+      return {
+        id: backendDriver._id || backendDriver.id || '',
+        name: backendDriver.name || backendDriver.userId?.name || 'Driver Partner',
+        phone: backendDriver.phone || backendDriver.userId?.phone || '',
+        profileImage: backendDriver.profileImage || backendDriver.userId?.profileImage || null,
+        rating: backendDriver.rating !== undefined ? Number(backendDriver.rating).toFixed(1) : '5.0',
+        totalRides: backendDriver.totalTripsCount ?? backendDriver.totalRides ?? 0,
+        experienceYears: backendDriver.experienceYears ?? 0,
+        distance: backendDriver.distanceKm ? `${backendDriver.distanceKm} km away` : 'Nearby',
+        isVerified: Boolean(backendDriver.isVerified ?? true),
+        vehicleModel: backendDriver.vehicleModel || vehicle?.model || vehicle?.name || backendDriver.vehicleType || 'Vehicle',
+        vehicleType: backendDriver.type || vehicle?.type || backendDriver.vehicleType || 'Car',
+        vehiclePlate: backendDriver.vehicleNo || backendDriver.vehiclePlate || 'Not Registered',
+        hasAc: Boolean(backendDriver.type),
+        seatingCapacity: backendDriver.seating ?? `${backendDriver.seating || 4} Seats`,
+        driverVehicleImg: backendDriver.vehicleImages,
+        vehicleImage: vehicleImg,
+      };
+    }
+
+    if (route.params?.driver) {
+      const d = route.params.driver as any;
+      const vehicle = typeof d.vehicleId === 'object' ? d.vehicleId : null;
+      const vehicleImg =
+        d.vehicleImage ||
+        (Array.isArray(d.vehicleImages) && d.vehicleImages.length > 0 ? d.vehicleImages[0] : null) ||
+        (Array.isArray(d.driverVehicleImg) && d.driverVehicleImg.length > 0 ? d.driverVehicleImg[0] : null) ||
+        vehicle?.image ||
+        (typeof d.driverVehicleImg === 'string' ? d.driverVehicleImg : null);
+
+      return {
+        ...d,
+        id: d.id || d._id || '',
+        name: d.name || d.userId?.name || '',
+        phone: d.phone || d.userId?.phone || '',
+        profileImage: d.profileImage || d.userId?.profileImage || null,
+        rating: d.rating !== undefined ? Number(d.rating).toFixed(1) : '5.0',
+        totalRides: d.totalTripsCount ?? d.totalRides ?? 0,
+        experienceYears: d.experienceYears ?? 0,
+        distance: d.distanceKm ? `${d.distanceKm} km away` : 'Nearby',
+        isVerified: Boolean(d.isVerified ?? true),
+        vehicleModel: d.vehicleModel || vehicle?.model || vehicle?.name || d.vehicleType || 'Vehicle',
+        vehicleType: d.type || vehicle?.type || d.vehicleType || '',
+        vehiclePlate: d.vehiclePlate || d.vehicleNo || 'Not Registered',
+        hasAc: Boolean(d.type),
+        seatingCapacity: d.seating ?? `${d.seating} Seats`,
+        driverVehicleImg: d.vehicleImages || d.driverVehicleImg,
+        vehicleImage: vehicleImg,
+      };
+    }
+    if (selectedDriver) {
+      const vehicle = typeof selectedDriver.vehicleId === 'object' ? selectedDriver.vehicleId : null;
+      return {
+        id: selectedDriver._id || selectedDriver.id || '',
+        name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
+        phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
+        profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
+        rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
+        totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
+        experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,
+        distance: selectedDriver.distanceKm ? `${selectedDriver.distanceKm} km away` : 'Nearby',
+        isVerified: Boolean(selectedDriver.isVerified ?? true),
+        vehicleModel: selectedDriver.vehicleModel || 'Vehicle',
+        vehicleType: selectedDriver.type || vehicle?.type || 'Car',
+        vehiclePlate: selectedDriver.vehicleNo || 'Not Registered',
+        hasAc: Boolean(selectedDriver.type),
+        seatingCapacity: selectedDriver.seating ?? `${selectedDriver.seating} Seats`,
+        driverVehicleImg: selectedDriver.vehicleImages,
+        vehicleImage: (selectedDriver.vehicleImages && selectedDriver.vehicleImages.length > 0)
+          ? selectedDriver.vehicleImages[0]
+          : (vehicle?.image || null),
+      };
+    }
+    return null;
+  }, [liveBookingData?.driverId, route.params?.driver, selectedDriver]);
+
+  const agreedFare = route.params?.agreedFare || liveBookingData?.fare || 0;
+  const bookingToken =
+    route.params?.bookingToken ||
+    liveBookingData?.tokenMoney ||
+    liveBookingData?.bookingToken ||
+    liveBookingData?.advanceAmount ||
+    200;
+  const name = route.params?.name;
+  const phone = route.params?.phone;
 
   const tripInfo: TripInfoData = route.params?.tripInfo || {
-    pickupLocation: 'Patna Junction',
-    destination: 'Gaya',
-    date: '15 Aug 2026',
-    pickupTime: '5:00 PM',
-    passengers: '4 People',
-    vehicleModel: driver.vehicleModel || 'Maruti Dzire',
+    pickupLocation: '',
+    destination: '',
+    date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+    pickupTime: new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }),
+    passengers: driver?.seatingCapacity || '4 Seats',
+    vehicleModel: driver?.vehicleModel || '',
   };
 
-  const driverFirstName = driver.name.split(' ')[0] || 'Rahul';
+  const driverFirstName = driver?.name?.split(' ')[0] || 'Driver';
   const remainingFare = Math.max(0, agreedFare - bookingToken);
+
+  // Navigate directly to Home
+  const handleGoHome = useCallback(() => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'HomeDashboard' }],
+    });
+  }, [navigation]);
+
+  // Handle hardware Android back button to go directly to Home
+  useEffect(() => {
+    const backAction = () => {
+      handleGoHome();
+      return true;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [handleGoHome]);
+
+  const handleCancelRequest = () => {
+    setShowCancelModal(true);
+  };
+
+  const handleConfirmCancel = async () => {
+    let finalReason = selectedReason;
+    if (selectedReason === 'Other') {
+      if (!otherReason.trim()) {
+        toast.showError('Please enter a cancellation reason.', 'Reason Required');
+        return;
+      }
+      finalReason = otherReason.trim();
+    }
+
+    setIsCancelling(true);
+    try {
+      const idToCancel = rawBookingId || bookingId;
+      if (idToCancel && !idToCancel.startsWith('#')) {
+        await dispatch(cancelBooking({ bookingId: idToCancel, reason: finalReason })).unwrap();
+      }
+    } catch (err: any) {
+      console.log('Cancel booking error/warning:', err);
+    } finally {
+      ridesService.updateRideStatus(bookingId, 'cancelled');
+      dispatch(updateActiveRideStatus({ bookingId, status: 'cancelled' }));
+      setIsCancelling(false);
+      setShowCancelModal(false);
+      handleGoHome();
+    }
+  };
+
+  const renderCancelModal = () => (
+    <Modal
+      visible={showCancelModal}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => {
+        if (!isCancelling) setShowCancelModal(false);
+      }}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        className="flex-1 justify-end bg-black/60"
+      >
+        <View
+          style={{ backgroundColor: colors.card }}
+          className="rounded-t-3xl p-6 shadow-2xl max-h-[85%]"
+        >
+          {/* Sheet Handle */}
+          <View className="items-center mb-4">
+            <View style={{ backgroundColor: colors.border }} className="w-12 h-1.5 rounded-full mb-3" />
+            <Text style={{ color: colors.text }} className="text-xl font-black">
+              Cancel Ride Request
+            </Text>
+            <Text style={{ color: colors.textSecondary }} className="text-xs mt-1 text-center">
+              Please choose a reason for cancellation
+            </Text>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} className="mb-4">
+            {CANCEL_REASONS.map((reason) => {
+              const isSelected = selectedReason === reason;
+              return (
+                <TouchableOpacity
+                  key={reason}
+                  activeOpacity={0.7}
+                  onPress={() => setSelectedReason(reason)}
+                  style={{
+                    backgroundColor: isSelected ? `${colors.primary}12` : colors.surface,
+                    borderColor: isSelected ? colors.primary : colors.border,
+                  }}
+                  className="p-3.5 rounded-xl border flex-row items-center justify-between mb-2.5"
+                >
+                  <Text
+                    style={{ color: isSelected ? colors.primary : colors.text }}
+                    className="text-xs font-semibold flex-1 mr-2"
+                  >
+                    {reason}
+                  </Text>
+                  <View
+                    style={{
+                      borderColor: isSelected ? colors.primary : colors.border,
+                      backgroundColor: isSelected ? colors.primary : 'transparent',
+                    }}
+                    className="w-5 h-5 rounded-full border items-center justify-center"
+                  >
+                    {isSelected && <View className="w-2 h-2 rounded-full bg-white" />}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* Custom Reason Input if "Other" is selected */}
+            {selectedReason === 'Other' && (
+              <View className="mt-1 mb-2">
+                <Text style={{ color: colors.textSecondary }} className="text-xs font-bold mb-1.5">
+                  Enter your reason:
+                </Text>
+                <TextInput
+                  value={otherReason}
+                  onChangeText={setOtherReason}
+                  placeholder="Tell us why you are cancelling..."
+                  placeholderTextColor={colors.placeholder}
+                  multiline
+                  numberOfLines={3}
+                  maxLength={250}
+                  style={{
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                    color: colors.text,
+                    textAlignVertical: 'top',
+                  }}
+                  className="p-3 rounded-xl border text-xs min-h-[70px]"
+                />
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Action Buttons */}
+          <View className="pt-2">
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleConfirmCancel}
+              disabled={isCancelling}
+              style={{
+                backgroundColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.35,
+                shadowRadius: 10,
+                elevation: 5,
+              }}
+              className="w-full py-4 rounded-xl flex-row items-center justify-center border border-red-500 mb-2.5"
+            >
+              {isCancelling ? (
+                <View className="flex-row items-center">
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <Text className="text-white text-sm font-extrabold ml-2">
+                    Cancelling Ride...
+                  </Text>
+                </View>
+              ) : (
+                <View className="flex-row items-center">
+                  <CrossCircleIcon size={18} color="#FFFFFF" />
+                  <Text className="text-white text-base font-black tracking-wide ml-2">
+                    Cancel Ride
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              disabled={isCancelling}
+              onPress={() => setShowCancelModal(false)}
+              style={{
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              }}
+              className="w-full py-3.5 rounded-xl items-center justify-center border"
+            >
+              <Text style={{ color: colors.textSecondary }} className="text-xs font-bold">
+                Don't Cancel (Keep Request)
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
+  // Real-time Status Sync from Server
+  const handleStatusUpdate = useCallback(
+    (b: any) => {
+      const st = (b?.status || '').toLowerCase();
+      if (!st) return;
+
+      setLiveBookingData(b);
+
+      if (st !== currentStatus) {
+        if (__DEV__) {
+          console.log(`🚕 [DriverAcceptedScreen] Status updated from "${currentStatus}" to "${st}"`);
+        }
+        setCurrentStatus(st);
+        ridesService.updateRideStatus(bookingId, st as any);
+        dispatch(updateActiveRideStatus({ bookingId, status: st as any }));
+
+        if (st === 'accepted') {
+          toast.showSuccess(
+            `${driverFirstName} has accepted your ride request! Complete token payment to confirm.`,
+            'Driver Accepted! 🎉',
+            5000
+          );
+        } else if (st === 'cancelled' || st === 'rejected') {
+          toast.showError('This ride request was cancelled or declined by driver.', 'Ride Declined');
+        }
+      }
+    },
+    [currentStatus, bookingId, dispatch, driverFirstName]
+  );
+
+  const checkBookingStatus = useCallback(async () => {
+    const idToFetch = rawBookingId;
+    if (idToFetch && !idToFetch.startsWith('#')) {
+      try {
+        const res = await bookingService.getBookingById(idToFetch);
+        const b = res?.booking || res?.data || res;
+        if (b && b.status) {
+          handleStatusUpdate(b);
+          return;
+        }
+      } catch (err) {
+        if (__DEV__) {
+          console.log('Error checking booking status by ID:', err);
+        }
+      }
+    }
+
+    // Fallback: check active booking
+    try {
+      const activeRes = await bookingService.getActiveBooking();
+      const b = activeRes?.data || activeRes;
+      if (b && b.status) {
+        handleStatusUpdate(b);
+      }
+    } catch (err) {
+      // ignore
+    }
+  }, [rawBookingId, handleStatusUpdate]);
+
+  // Initial check on mount
+  useEffect(() => {
+    checkBookingStatus();
+  }, [checkBookingStatus]);
+
+  // Real-time polling every 3 seconds while waiting for driver acceptance
+  useEffect(() => {
+    if (isDriverAccepted) return;
+
+    const interval = setInterval(() => {
+      checkBookingStatus();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [isDriverAccepted, checkBookingStatus]);
+
+  // Immediate push notification reaction
+  useEffect(() => {
+    const unsubscribe = notificationService.addListener((remoteMessage) => {
+      if (__DEV__) {
+        console.log('🔔 [DriverAcceptedScreen] Push notification received on screen:', remoteMessage);
+      }
+      checkBookingStatus();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [checkBookingStatus]);
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -94,45 +500,122 @@ export const DriverAcceptedScreen: React.FC = () => {
     return () => pulse.stop();
   }, [isDriverAccepted, pulseAnimation]);
 
-  useEffect(() => {
-    const acceptanceTimer = setTimeout(() => {
-      setIsDriverAccepted(true);
-    }, 10000);
-
-    return () => clearTimeout(acceptanceTimer);
-  }, []);
-
   const handlePayToken = () => {
     setShowPaymentModal(true);
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
     setIsProcessingPayment(true);
-    setTimeout(() => {
+    try {
+      if (rawBookingId) {
+        await dispatch(
+          payBookingToken({
+            bookingId: rawBookingId,
+            paymentMethod: selectedMethod,
+            amount: Number(bookingToken) || 0,
+          })
+        ).unwrap();
+      }
+
       setIsProcessingPayment(false);
       setShowPaymentModal(false);
+      ridesService.updateRideStatus(bookingId, 'active');
+      dispatch(updateActiveRideStatus({ bookingId, status: 'active' }));
+      toast.showSuccess('Booking token payment successful!');
       navigation.navigate('RideConfirmed', {
-        driver,
+        driver: driver || undefined,
         agreedFare,
         tripInfo,
         bookingToken,
-        bookingId: '#RIDE10245',
+        bookingId,
       });
-    }, 800);
+    } catch (err: any) {
+      setIsProcessingPayment(false);
+      const errMsg =
+        err?.message ||
+        (typeof err === 'string' ? err : 'Failed to process payment. Please try again.');
+      toast.showError(errMsg);
+      Alert.alert('Payment Error', errMsg);
+    }
   };
+
+  // If driver cancelled or declined
+  if (currentStatus === 'cancelled' || currentStatus === 'rejected') {
+    return (
+      <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-center items-center px-6">
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.background}
+        />
+        <HeaderBar onBackPress={handleGoHome} />
+        <View className="flex-1 items-center justify-center w-full px-4">
+          <View style={{ backgroundColor: '#FEE2E2', padding: 22, borderRadius: 50, marginBottom: 16 }}>
+            <CrossCircleIcon size={44} color="#DC2626" />
+          </View>
+          <Text style={{ color: colors.text }} className="text-xl font-black text-center">
+            Ride Request {currentStatus === 'rejected' ? 'Declined' : 'Cancelled'}
+          </Text>
+          <Text style={{ color: colors.textSecondary }} className="text-xs text-center mt-2 mb-6 max-w-[280px] leading-5">
+            The driver was unable to accept this request. Please try requesting another vehicle or driver.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleGoHome}
+            style={{ backgroundColor: colors.primary }}
+            className="px-6 py-3.5 rounded-xl w-full items-center shadow-md"
+          >
+            <Text className="text-white font-bold text-sm">Find Another Driver</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!driver) {
+    return (
+      <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.background}
+        />
+        <HeaderBar onBackPress={handleGoHome} />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text style={{ color: colors.text }} className="text-base font-bold text-center">
+            Booking information not available
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={handleGoHome}
+            style={{ backgroundColor: colors.primary }}
+            className="mt-4 px-6 py-2.5 rounded-xl"
+          >
+            <Text className="text-white font-bold text-sm">Go to Home</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!isDriverAccepted) {
     const pulseScale = pulseAnimation.interpolate({
       inputRange: [0, 1],
-      outputRange: [1, 1.12],
+      outputRange: [1, 1.08],
     });
-    const ringScale = pulseAnimation.interpolate({
+    const ring1Scale = pulseAnimation.interpolate({
       inputRange: [0, 1],
-      outputRange: [1, 1.6],
+      outputRange: [1, 1.5],
     });
-    const ringOpacity = pulseAnimation.interpolate({
+    const ring1Opacity = pulseAnimation.interpolate({
       inputRange: [0, 1],
-      outputRange: [0.35, 0],
+      outputRange: [0.5, 0],
+    });
+    const ring2Scale = pulseAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [1, 2.0],
+    });
+    const ring2Opacity = pulseAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.25, 0],
     });
 
     return (
@@ -141,88 +624,239 @@ export const DriverAcceptedScreen: React.FC = () => {
           barStyle={isDark ? 'light-content' : 'dark-content'}
           backgroundColor={colors.background}
         />
-        <HeaderBar onBackPress={() => navigation.goBack()} />
+        <HeaderBar onBackPress={handleGoHome} />
 
-        <View className="flex-1 items-center justify-center px-6">
-          <View className="w-28 h-28 items-center justify-center">
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingBottom: 32 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* ── Hero sonar animation ─────────────────── */}
+          <View style={{ alignItems: 'center', marginTop: 32, marginBottom: 28 }}>
+            {/* Ring 2 — farthest */}
             <Animated.View
-              style={{ transform: [{ scale: ringScale }], opacity: ringOpacity }}
-              className="absolute w-28 h-28 rounded-full bg-blue-500"
+              style={{
+                position: 'absolute',
+                top: 0,
+                width: 96, height: 96, borderRadius: 48,
+                backgroundColor: `${colors.primary}20`,
+                transform: [{ scale: ring2Scale }],
+                opacity: ring2Opacity,
+              }}
             />
+            {/* Ring 1 */}
             <Animated.View
-              style={{ transform: [{ scale: pulseScale }] }}
-              className="w-20 h-20 rounded-full bg-blue-600 items-center justify-center shadow-lg shadow-blue-300"
+              style={{
+                position: 'absolute',
+                top: 0,
+                width: 96, height: 96, borderRadius: 48,
+                backgroundColor: `${colors.primary}35`,
+                transform: [{ scale: ring1Scale }],
+                opacity: ring1Opacity,
+              }}
+            />
+            {/* Core button */}
+            <Animated.View
+              style={{
+                width: 96, height: 96, borderRadius: 48,
+                backgroundColor: colors.primary,
+                alignItems: 'center',
+                justifyContent: 'center',
+                transform: [{ scale: pulseScale }],
+                shadowColor: colors.primary,
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.4,
+                shadowRadius: 14,
+                elevation: 10,
+              }}
             >
-              <CarBadgeIcon size={34} color="#FFFFFF" />
+              <ClockOutlineIcon size={40} color="#FFFFFF" strokeWidth={2.2} />
             </Animated.View>
           </View>
 
-          <Text style={{ color: colors.text }} className="text-2xl font-black text-center mt-8">
-            Waiting for driver acceptance
-          </Text>
-          <Text style={{ color: colors.textSecondary }} className="text-sm font-medium text-center mt-2 leading-5">
-            Your ride request has been sent to {driverFirstName}. We will show the booking details as soon as the driver accepts.
-          </Text>
+          {/* ── Title ─────────────────────────────────── */}
+          <View style={{ alignItems: 'center', marginBottom: 24 }}>
+            <Text
+              style={{ color: colors.text, fontSize: 22, fontWeight: '900', letterSpacing: -0.5 }}
+            >
+              Waiting for Acceptance
+            </Text>
 
+            {/* Live searching badge */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                marginTop: 10,
+                backgroundColor: `${colors.primary}12`,
+                borderRadius: 20,
+                borderWidth: 1,
+                borderColor: `${colors.primary}30`,
+                paddingHorizontal: 12,
+                paddingVertical: 5,
+              }}
+            >
+              <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 6 }} />
+              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>
+                Contacting {driverFirstName}...
+              </Text>
+            </View>
+
+            <Text
+              style={{
+                color: colors.textSecondary,
+                fontSize: 13,
+                fontWeight: '500',
+                textAlign: 'center',
+                marginTop: 12,
+                lineHeight: 20,
+                paddingHorizontal: 8,
+              }}
+            >
+              Booking details will appear here as soon as the driver accepts your request.
+            </Text>
+          </View>
+
+          {/* ── Driver card ───────────────────────────── */}
           <View
             style={{
               backgroundColor: colors.card,
+              borderRadius: 20,
+              borderWidth: 1,
               borderColor: colors.border,
+              padding: 16,
+              marginBottom: 16,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: isDark ? 0.25 : 0.07,
+              shadowRadius: 10,
+              elevation: 4,
             }}
-            className="w-full border rounded-2xl shadow-sm p-4 mt-8"
           >
-            <View className="flex-row items-center">
-              <View className="w-11 h-11 rounded-full bg-blue-50 border border-blue-100 items-center justify-center mr-3">
-                <CarBadgeIcon size={22} color="#2563EB" />
+            {/* Label row */}
+            <Text
+              style={{
+                color: colors.placeholder,
+                fontSize: 10,
+                fontWeight: '800',
+                letterSpacing: 1.2,
+                textTransform: 'uppercase',
+                marginBottom: 12,
+              }}
+            >
+              Requested Driver
+            </Text>
+
+            {/* Driver row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {/* Photo / vehicle thumbnail */}
+              <View
+                style={{
+                  width: 56, height: 56,
+                  borderRadius: 16,
+                  backgroundColor: `${colors.primary}10`,
+                  borderWidth: 1,
+                  borderColor: `${colors.primary}25`,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginRight: 14,
+                  overflow: 'hidden',
+                }}
+              >
+                {driver.vehicleImage ? (
+                  <Image source={{ uri: driver.vehicleImage }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                ) : (
+                  <CarBadgeIcon size={26} color={colors.primary} />
+                )}
               </View>
-              <View className="flex-1">
-                <Text style={{ color: colors.placeholder }} className="text-[10px] font-bold uppercase tracking-wider">
-                  Requested driver
+
+              {/* Name + vehicle */}
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontSize: 15, fontWeight: '800' }} numberOfLines={1}>
+                  {driver.name || name || 'Driver'}
                 </Text>
-                <Text style={{ color: colors.text }} className="text-base font-extrabold mt-0.5">
-                  {driver.name}
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '500', marginTop: 2 }} numberOfLines={1}>
+                  {[driver.vehicleModel, driver.vehiclePlate && driver.vehiclePlate !== 'Not Registered' ? driver.vehiclePlate : null]
+                    .filter(Boolean).join('  ·  ') || 'Vehicle info loading...'}
                 </Text>
               </View>
-              <View className="px-2.5 py-1 rounded-full bg-blue-50 border border-blue-100">
-                <Text className="text-[10px] font-bold text-blue-600">
-                  Pending
+
+              {/* Pending badge */}
+              <View
+                style={{
+                  backgroundColor: '#FFFBEB',
+                  borderRadius: 20,
+                  borderWidth: 1,
+                  borderColor: '#FCD34D',
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                }}
+              >
+                <Text style={{ color: '#D97706', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 }}>
+                  PENDING
                 </Text>
               </View>
             </View>
 
-            <View style={{ backgroundColor: colors.border }} className="h-px my-3.5" />
+            {/* Divider */}
+            <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 12 }} />
 
-            <View className="flex-row items-center justify-center">
+            {/* Status row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold ml-2">
+              <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginLeft: 8, flex: 1 }}>
                 Checking driver availability...
               </Text>
             </View>
           </View>
 
-          <View className="flex-row items-center mt-5">
-            <ClockOutlineIcon size={14} color={colors.placeholder} />
-            <Text style={{ color: colors.placeholder }} className="text-xs font-medium ml-1.5">
+          {/* ── Eta hint ──────────────────────────────── */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: colors.surface,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: colors.border,
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+              marginBottom: 20,
+            }}
+          >
+            <ClockOutlineIcon size={14} color={colors.placeholder} strokeWidth={2} />
+            <Text style={{ color: colors.placeholder, fontSize: 12, fontWeight: '500', marginLeft: 8 }}>
               This usually takes less than a minute
             </Text>
           </View>
 
+          {/* ── Cancel button ─────────────────────────── */}
           <TouchableOpacity
             activeOpacity={0.7}
-            onPress={() => navigation.goBack()}
+            onPress={handleCancelRequest}
             style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
               backgroundColor: colors.surface,
+              borderRadius: 14,
+              borderWidth: 1,
               borderColor: colors.border,
+              paddingVertical: 13,
             }}
-            className="flex-row items-center mt-6 px-6 py-3 rounded-xl border"
           >
             <CrossCircleIcon size={15} color={colors.textSecondary} />
-            <Text style={{ color: colors.text }} className="text-sm font-bold ml-2">Cancel Request</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '700', marginLeft: 7 }}>
+              Cancel Request
+            </Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
+
+        {renderCancelModal()}
       </SafeAreaView>
     );
   }
+
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-between">
@@ -232,7 +866,7 @@ export const DriverAcceptedScreen: React.FC = () => {
       />
 
       {/* Top Navigation Bar */}
-      <HeaderBar onBackPress={() => navigation.goBack()} />
+      <HeaderBar onBackPress={handleGoHome} />
 
       <ScrollView
         contentContainerStyle={{
@@ -304,6 +938,16 @@ export const DriverAcceptedScreen: React.FC = () => {
             </View>
             <Text className="text-white text-base font-extrabold tracking-wide">
               Pay ₹{bookingToken} Token
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={handleCancelRequest}
+            className="mt-3 py-2 items-center justify-center"
+          >
+            <Text style={{ color: colors.textSecondary }} className="text-xs font-bold">
+              Cancel Request
             </Text>
           </TouchableOpacity>
         </View>
@@ -411,6 +1055,8 @@ export const DriverAcceptedScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      {renderCancelModal()}
     </SafeAreaView>
   );
 };

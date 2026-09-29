@@ -35,9 +35,6 @@ export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<SettingsScreenNavigationProp>();
   const { themeMode, setThemeMode, colors, isDark } = useTheme();
 
-  // Settings toggles
-  const [pushNotifications, setPushNotifications] = useState(true);
-  const [soundVibration, setSoundVibration] = useState(true);
 
   const themeOptions: ThemeOptionItem[] = [
     {
@@ -109,7 +106,7 @@ export const SettingsScreen: React.FC = () => {
               backgroundColor: colors.card,
               borderColor: colors.border,
             }}
-            className="rounded-2xl border overflow-hidden shadow-sm"
+            className="rounded-xl border overflow-hidden shadow-sm"
           >
             {themeOptions.map((opt, idx) => {
               const isSelected = themeMode === opt.id;
@@ -192,62 +189,7 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* SECTION 2: NOTIFICATIONS & ALERTS */}
-        <View className="mb-6">
-          <Text
-            style={{ color: colors.textSecondary }}
-            className="text-[11px] font-bold uppercase tracking-wider mb-2.5 px-1"
-          >
-            NOTIFICATIONS & SOUND
-          </Text>
 
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            }}
-            className="rounded-2xl border overflow-hidden shadow-sm"
-          >
-            {/* Push Notifications Toggle */}
-            <View
-              style={{ borderBottomColor: colors.border }}
-              className="p-4 flex-row items-center justify-between border-b"
-            >
-              <View className="flex-1 mr-3">
-                <Text style={{ color: colors.text }} className="text-sm font-bold">
-                  Ride & Driver Alerts
-                </Text>
-                <Text style={{ color: colors.textSecondary }} className="text-xs mt-0.5">
-                  Get real-time updates when driver accepts your trip
-                </Text>
-              </View>
-              <Switch
-                value={pushNotifications}
-                onValueChange={setPushNotifications}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor={Platform.OS === 'android' ? (pushNotifications ? '#FFFFFF' : '#F1F5F9') : undefined}
-              />
-            </View>
-
-            {/* Sound & Vibration Toggle */}
-            <View className="p-4 flex-row items-center justify-between">
-              <View className="flex-1 mr-3">
-                <Text style={{ color: colors.text }} className="text-sm font-bold">
-                  Sound & Vibration
-                </Text>
-                <Text style={{ color: colors.textSecondary }} className="text-xs mt-0.5">
-                  Play tone when receiving driver fare proposals
-                </Text>
-              </View>
-              <Switch
-                value={soundVibration}
-                onValueChange={setSoundVibration}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor={Platform.OS === 'android' ? (soundVibration ? '#FFFFFF' : '#F1F5F9') : undefined}
-              />
-            </View>
-          </View>
-        </View>
 
         {/* SECTION 3: PRIVACY & PERMISSIONS */}
         <View className="mb-6">
@@ -263,7 +205,7 @@ export const SettingsScreen: React.FC = () => {
               backgroundColor: colors.card,
               borderColor: colors.border,
             }}
-            className="rounded-2xl border overflow-hidden shadow-sm"
+            className="rounded-xl border overflow-hidden shadow-sm"
           >
             {/* Location Permission */}
             <TouchableOpacity

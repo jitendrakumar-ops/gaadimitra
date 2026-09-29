@@ -5,7 +5,6 @@ import {
   StatusBar,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Modal,
   TextInput,
 } from 'react-native';
@@ -14,6 +13,8 @@ import { useNavigation } from '@react-navigation/native';
 import { LocationMarkerIcon, XCloseIcon } from '../../assets/icons/Icons';
 import { HeaderBar } from '../../components/common/HeaderBar';
 import { useTheme } from '../../theme';
+import { toast } from '../../components/common/ToastNotification';
+import { confirmDialog } from '../../components/common/CustomAlertModal';
 
 interface SavedPlace {
   id: string;
@@ -23,52 +24,34 @@ interface SavedPlace {
   isPrimary?: boolean;
 }
 
-const DEFAULT_PLACES: SavedPlace[] = [
-  {
-    id: 'p_1',
-    tag: 'Home',
-    label: 'Home Address',
-    address: 'Flat 402, Royal Residency, Bailey Road, Patna',
-    isPrimary: true,
-  },
-  {
-    id: 'p_2',
-    tag: 'Work',
-    label: 'Office HQ',
-    address: 'Tech Park, Frazer Road, Near Patna Junction, Patna',
-  },
-  {
-    id: 'p_3',
-    tag: 'Other',
-    label: 'Airport Terminal',
-    address: 'Jay Prakash Narayan Airport, Patna, Bihar',
-  },
-];
-
 export const SavedLocationsScreen: React.FC = () => {
   const navigation = useNavigation();
   const { colors, isDark } = useTheme();
 
-  const [places, setPlaces] = useState<SavedPlace[]>(DEFAULT_PLACES);
+  const [places, setPlaces] = useState<SavedPlace[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [newAddress, setNewAddress] = useState('');
   const [newTag, setNewTag] = useState<'Home' | 'Work' | 'Other'>('Other');
 
   const handleDelete = (id: string, label: string) => {
-    Alert.alert('Delete Location', `Are you sure you want to remove "${label}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => setPlaces(places.filter(p => p.id !== id)),
+    confirmDialog.show({
+      title: 'Delete Location',
+      message: `Are you sure you want to remove "${label}"?`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      isDestructive: true,
+      icon: 'delete',
+      onConfirm: () => {
+        setPlaces((prev) => prev.filter((p) => p.id !== id));
+        toast.showSuccess(`"${label}" removed successfully.`, 'Deleted');
       },
-    ]);
+    });
   };
 
   const handleAddNew = () => {
     if (!newLabel.trim() || !newAddress.trim()) {
-      Alert.alert('Incomplete Details', 'Please fill in both label and address.');
+      toast.showError('Please fill in both label and address.', 'Incomplete Details');
       return;
     }
     const newPlace: SavedPlace = {
@@ -78,6 +61,7 @@ export const SavedLocationsScreen: React.FC = () => {
       address: newAddress.trim(),
     };
     setPlaces([...places, newPlace]);
+    toast.showSuccess(`Location "${newLabel.trim()}" saved!`, 'Saved');
     setNewLabel('');
     setNewAddress('');
     setShowAddModal(false);
@@ -114,53 +98,76 @@ export const SavedLocationsScreen: React.FC = () => {
           </Text>
 
           <View className="space-y-3">
-            {places.map(place => (
+            {places.length === 0 ? (
               <View
-                key={place.id}
                 style={{
                   backgroundColor: colors.card,
                   borderColor: colors.border,
                 }}
-                className="rounded-xl border p-4 mb-3"
+                className="rounded-xl border p-8 items-center justify-center my-3"
               >
-                <View className="flex-row items-start justify-between">
-                  <View className="flex-row items-start flex-1 mr-2">
-                    <View
-                      style={{ backgroundColor: `${colors.primary}18` }}
-                      className="w-10 h-10 rounded-xl items-center justify-center mr-3 mt-0.5"
-                    >
-                      <LocationMarkerIcon size={20} color={colors.primary} />
-                    </View>
-                    <View className="flex-1">
-                      <View className="flex-row items-center">
-                        <Text style={{ color: colors.text }} className="text-sm font-extrabold">
-                          {place.label}
-                        </Text>
-                        <View
-                          style={{ backgroundColor: colors.surface }}
-                          className="ml-2 px-2 py-0.5 rounded-md"
-                        >
-                          <Text style={{ color: colors.textSecondary }} className="text-[10px] font-bold">
-                            {place.tag}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={{ color: colors.textSecondary }} className="text-xs font-medium mt-1 leading-relaxed">
-                        {place.address}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => handleDelete(place.id, place.label)}
-                    className="p-1"
-                  >
-                    <Text style={{ color: colors.error }} className="text-xs font-bold">Remove</Text>
-                  </TouchableOpacity>
+                <View
+                  style={{ backgroundColor: `${colors.primary}15` }}
+                  className="w-14 h-14 rounded-full items-center justify-center mb-3"
+                >
+                  <LocationMarkerIcon size={26} color={colors.primary} />
                 </View>
+                <Text style={{ color: colors.text }} className="text-base font-extrabold mb-1">
+                  No Saved Locations
+                </Text>
+                <Text style={{ color: colors.textSecondary }} className="text-xs text-center leading-relaxed px-4">
+                  You haven't saved any locations yet. Add frequent places like Home or Work for quick booking.
+                </Text>
               </View>
-            ))}
+            ) : (
+              places.map(place => (
+                <View
+                  key={place.id}
+                  style={{
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  }}
+                  className="rounded-xl border p-4 mb-3"
+                >
+                  <View className="flex-row items-start justify-between">
+                    <View className="flex-row items-start flex-1 mr-2">
+                      <View
+                        style={{ backgroundColor: `${colors.primary}18` }}
+                        className="w-10 h-10 rounded-xl items-center justify-center mr-3 mt-0.5"
+                      >
+                        <LocationMarkerIcon size={20} color={colors.primary} />
+                      </View>
+                      <View className="flex-1">
+                        <View className="flex-row items-center">
+                          <Text style={{ color: colors.text }} className="text-sm font-extrabold">
+                            {place.label}
+                          </Text>
+                          <View
+                            style={{ backgroundColor: colors.surface }}
+                            className="ml-2 px-2 py-0.5 rounded-md"
+                          >
+                            <Text style={{ color: colors.textSecondary }} className="text-[10px] font-bold">
+                              {place.tag}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={{ color: colors.textSecondary }} className="text-xs font-medium mt-1 leading-relaxed">
+                          {place.address}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => handleDelete(place.id, place.label)}
+                      className="p-1"
+                    >
+                      <Text style={{ color: colors.error }} className="text-xs font-bold">Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
           </View>
         </View>
 

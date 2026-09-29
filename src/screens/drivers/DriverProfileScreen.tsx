@@ -10,6 +10,7 @@ import {
   Linking,
   Share,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -37,55 +38,71 @@ import {
   SparkleCleanIcon,
   CrossCircleIcon,
 } from '../../assets/icons/Icons';
-import { ToastNotification, ToastType } from '../../components/common/ToastNotification';
+import { toast, ToastType } from '../../components/common/ToastNotification';
 import { ReportDriverModal } from '../../components/drivers/ReportDriverModal';
 import { HeaderBar } from '../../components/common/HeaderBar';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector, fetchDriverById, reportDriver } from '../../store';
 
 export const DriverProfileScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<DriverProfileScreenNavigationProp>();
   const route = useRoute<DriverProfileScreenRouteProp>();
+  const dispatch = useAppDispatch();
 
-  // Default driver data if not passed
-  const driver: DriverInfo = route.params?.driver || {
-    id: 'drv_1',
-    name: 'Rahul Kumar',
-    phone: '+919876543210',
-    rating: '4.8',
-    totalRides: 286,
-    experienceYears: 5,
-    distance: '1.2 km away',
-    isVerified: true,
-    vehicleModel: 'Maruti Dzire',
-    vehicleType: 'Car',
-    vehiclePlate: 'BR01AB1234',
-    hasAc: true,
-    seatingCapacity: '4 Seats',
-    pricePerKm: '₹14 /km',
-  };
+  // Redux: selected driver profile from GET /drivers/:driverId
+  const { selectedDriver, isLoading, error } = useAppSelector((state) => state.drivers);
+
+  // Extract driverId from route params
+  const driverId = route.params?.driverId || route.params?.driver?.id || (route.params?.driver as any)?._id;
+
+  // Dispatch live API GET /drivers/:driverId via Redux
+  useEffect(() => {
+    if (driverId) {
+      dispatch(fetchDriverById(driverId));
+    }
+  }, [dispatch, driverId]);
+
+  // Live driver object purely from Redux GET /drivers/:driverId or route.params.driver (no hardcoded/dummy data)
+  const driver: DriverInfo | null = React.useMemo(() => {
+    if (selectedDriver) {
+      const vehicle = typeof selectedDriver.vehicleId === 'object' ? selectedDriver.vehicleId : null;
+
+      return {
+        id: selectedDriver._id || selectedDriver.id || driverId || '',
+        name: selectedDriver.userId?.name || (selectedDriver as any).name || route.params?.driver?.name || 'Driver Partner',
+        phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || route.params?.driver?.phone || '',
+        profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || route.params?.driver?.profileImage || null,
+        rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : (route.params?.driver?.rating || '5.0'),
+        totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? route.params?.driver?.totalRides ?? 0,
+        experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? route.params?.driver?.experienceYears ?? 0,
+        distance: selectedDriver.distanceKm ? `${selectedDriver.distanceKm} km away` : (route.params?.driver?.distance || 'Nearby'),
+        isVerified: Boolean(selectedDriver.isVerified ?? route.params?.driver?.isVerified ?? true),
+        vehicleModel: selectedDriver.vehicleModel || route.params?.driver?.vehicleModel,
+
+        vehicleType: selectedDriver.type || vehicle?.type || route.params?.driver?.vehicleType,
+        vehiclePlate: selectedDriver.vehicleNo || route.params?.driver?.vehiclePlate || 'Not Registered',
+        hasAc: Boolean(selectedDriver.type || route.params?.driver?.hasAc),
+        seatingCapacity: selectedDriver.seating ?? `${selectedDriver.seating} Seats`,
+        driverVehicleImg: selectedDriver.vehicleImages || route.params?.driver?.driverVehicleImg,
+        vehicleImage: (selectedDriver.vehicleImages && selectedDriver.vehicleImages.length > 0)
+          ? selectedDriver.vehicleImages[0]
+          : (vehicle?.image || route.params?.driver?.vehicleImage || null),
+      };
+    }
+    if (route.params?.driver) {
+      return route.params.driver;
+    }
+    return null;
+  }, [selectedDriver, driverId, route.params?.driver]);
 
   // States
   const [isReportModalVisible, setIsReportModalVisible] = useState<boolean>(false);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
   const isCallInProgress = useRef(false);
-  const [toast, setToast] = useState<{
-    visible: boolean;
-    message: string;
-    type: ToastType;
-  }>({
-    visible: false,
-    message: '',
-    type: 'success',
-  });
-
   const showToast = (message: string, type: ToastType = 'success') => {
-    setToast({ visible: true, message, type });
-  };
-
-  const hideToast = () => {
-    setToast(prev => ({ ...prev, visible: false }));
+    toast.show({ message, type });
   };
 
   useEffect(() => {
@@ -100,6 +117,10 @@ export const DriverProfileScreen: React.FC = () => {
   }, [driver, navigation, route.params?.selectedCity]);
 
   const handleCallDriver = () => {
+    if (!driver?.phone) {
+      showToast('Driver phone number not available', 'error');
+      return;
+    }
     isCallInProgress.current = true;
     Linking.openURL(`tel:${driver.phone}`).catch(() => {
       isCallInProgress.current = false;
@@ -108,6 +129,7 @@ export const DriverProfileScreen: React.FC = () => {
   };
 
   const handleConfirmation = () => {
+    if (!driver) return;
     setShowFinalizeModal(false);
     navigation.navigate('FinalizeRide', {
       driver,
@@ -121,6 +143,7 @@ export const DriverProfileScreen: React.FC = () => {
   };
 
   const handleShareProfile = async () => {
+    if (!driver) return;
     try {
       await Share.share({
         message: `🚗 GaadiMitra Verified Driver: ${driver.name}\nVehicle: ${driver.vehicleModel} (${driver.vehiclePlate})\nRating: ⭐ ${driver.rating} | Rides: ${driver.totalRides}\nPhone: ${driver.phone}\nBook safe rides with GaadiMitra!`,
@@ -133,6 +156,7 @@ export const DriverProfileScreen: React.FC = () => {
   };
 
   const handleToggleFavorite = () => {
+    if (!driver) return;
     const nextState = !isFavorite;
     setIsFavorite(nextState);
     if (nextState) {
@@ -144,9 +168,91 @@ export const DriverProfileScreen: React.FC = () => {
 
 
 
-  const handleReportSubmit = (reason: string) => {
-    showToast(`Report received for "${reason}". Our safety team will review this driver.`, 'error');
+  const handleReportSubmit = async (reason: string, details?: string) => {
+    const driverId = driver?.id || (driver as any)?._id;
+    if (!driverId) {
+      showToast('Driver ID not found', 'error');
+      return;
+    }
+
+    try {
+      const fullReason = details && details.trim() ? `${reason} - ${details.trim()}` : reason;
+      const resultAction = await dispatch(
+        reportDriver({
+          driverId,
+          reason: fullReason,
+          details: details?.trim() || undefined,
+        })
+      );
+
+      if (reportDriver.fulfilled.match(resultAction)) {
+        showToast(`Report received for "${reason}". Our safety team will review this driver.`, 'success');
+      } else if (reportDriver.rejected.match(resultAction)) {
+        showToast(resultAction.payload || 'Failed to submit report', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error submitting report', 'error');
+    }
   };
+
+  // 1. Loading state (No default data, live loading indicator)
+  if (isLoading && !driver) {
+    return (
+      <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.background}
+        />
+        <HeaderBar
+          onBackPress={() => navigation.goBack()}
+          title="Driver Profile"
+          className="border-b"
+          style={{ borderBottomColor: colors.border }}
+        />
+        <View className="flex-1 items-center justify-center p-6">
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ color: colors.textSecondary }} className="text-sm font-semibold mt-3">
+            Loading driver profile...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // 2. Empty / Error state (No dummy data fallback)
+  if (!driver) {
+    return (
+      <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.background}
+        />
+        <HeaderBar
+          onBackPress={() => navigation.goBack()}
+          title="Driver Profile"
+          className="border-b"
+          style={{ borderBottomColor: colors.border }}
+        />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text style={{ color: colors.text }} className="text-base font-bold text-center">
+            {error || 'No driver profile found'}
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              if (driverId) {
+                dispatch(fetchDriverById(driverId));
+              }
+            }}
+            style={{ backgroundColor: colors.primary }}
+            className="mt-4 px-6 py-2.5 rounded-xl"
+          >
+            <Text className="text-white font-bold text-sm">Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-between">
@@ -162,13 +268,7 @@ export const DriverProfileScreen: React.FC = () => {
         style={{ borderBottomColor: colors.border }}
       />
 
-      {/* Floating Animated Toast Notification */}
-      <ToastNotification
-        visible={toast.visible}
-        message={toast.message}
-        type={toast.type}
-        onHide={hideToast}
-      />
+
 
       <Modal
         visible={showFinalizeModal}
@@ -250,10 +350,18 @@ export const DriverProfileScreen: React.FC = () => {
             {/* Avatar with Double Ring and Verified Badge */}
             <View className="relative">
               <View className="w-[86px] h-[86px] rounded-full bg-sky-100 items-center justify-center border-[1.5px] border-sky-200">
-                <Image
-                  source={require('../../assets/images/driver_rahul.jpg')}
-                  className="w-[80px] h-[80px] rounded-full"
-                />
+                {driver.profileImage ? (
+                  <Image
+                    source={{ uri: driver.profileImage }}
+                    className="w-[80px] h-[80px] rounded-full"
+                  />
+                ) : (
+                  <View className="w-[80px] h-[80px] rounded-full bg-blue-100 items-center justify-center">
+                    <Text className="text-2xl font-black text-blue-600">
+                      {driver.name ? driver.name.charAt(0).toUpperCase() : 'D'}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {/* Verified Blue Shield Tick Badge */}
@@ -395,7 +503,7 @@ export const DriverProfileScreen: React.FC = () => {
                 {driver.vehicleModel}
               </Text>
               <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold mt-0.5" numberOfLines={1}>
-                Car • {driver.seatingCapacity} • {driver.hasAc ? 'AC' : 'Non-AC'}
+                {driver.seatingCapacity}
               </Text>
 
               {/* Indian License Plate Graphic */}
@@ -415,13 +523,29 @@ export const DriverProfileScreen: React.FC = () => {
               </View>
             </View>
 
-            {/* Realistic Maruti Dzire Car Image */}
+            {/* Vehicle Image */}
             <View className="w-36 h-20 items-center justify-center">
-              <Image
-                source={require('../../assets/images/maruti_dzire_white.jpg')}
-                className="w-full h-full"
-                resizeMode="contain"
-              />
+              {(() => {
+                const vehicleImg =
+                  driver.vehicleImage ||
+                  (Array.isArray(driver.driverVehicleImg)
+                    ? driver.driverVehicleImg[0]
+                    : driver.driverVehicleImg);
+
+                return vehicleImg ? (
+                  <Image
+                    source={{ uri: vehicleImg }}
+                    className="w-full h-full rounded-lg"
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <Image
+                    source={require('../../assets/images/maruti_dzire_white.jpg')}
+                    className="w-full h-full"
+                    resizeMode="contain"
+                  />
+                );
+              })()}
             </View>
           </View>
 
@@ -430,17 +554,17 @@ export const DriverProfileScreen: React.FC = () => {
 
           {/* Bottom Features Row: 3 Metrics */}
           <View className="flex-row items-center justify-between">
-            {/* Feature 1: Price Per KM */}
+            {/* Feature 1: Verified RC */}
             <View className="flex-row items-center flex-1 px-0.5">
               <View className="w-6 h-6 rounded-full bg-blue-600 items-center justify-center mr-1.5">
-                <SpeedometerIcon size={12} color="#FFFFFF" />
+                <CheckCircleIcon size={12} color="#FFFFFF" />
               </View>
               <View className="flex-1">
                 <Text style={{ color: colors.text }} className="text-[10.5px] font-extrabold leading-tight" numberOfLines={1}>
-                  {driver.pricePerKm || '₹14 /km'}
+                  Verified RC
                 </Text>
                 <Text style={{ color: colors.textSecondary }} className="text-[9px] font-medium" numberOfLines={1}>
-                  Price/km
+                  Govt Approved
                 </Text>
               </View>
             </View>

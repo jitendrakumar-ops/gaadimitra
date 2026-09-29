@@ -42,7 +42,14 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
       <View className="mr-3">
         {isGoogle ? <GoogleIcon size={20} /> : <AppleIcon size={20} color="#000000" />}
       </View>
-      <Text className="text-sm font-semibold text-slate-700 tracking-tight">
+      <Text
+        style={{
+          includeFontPadding: false,
+          textAlignVertical: 'center',
+          transform: [{ translateY: Platform.OS === 'android' ? -1 : -0.5 }],
+        }}
+        className="text-sm font-semibold text-slate-700 tracking-tight"
+      >
         {label}
       </Text>
     </TouchableOpacity>

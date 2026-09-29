@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,9 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   Linking,
   Switch,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -18,32 +18,85 @@ import {
 } from '../../assets/icons/Icons';
 import { HeaderBar } from '../../components/common/HeaderBar';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector } from '../../store';
+import { updateProfile } from '../../store/slices/authSlice';
+import { storageService } from '../../services/storage';
+import { toast } from '../../components/common/ToastNotification';
+import { confirmDialog } from '../../components/common/CustomAlertModal';
 
 export const EmergencyContactScreen: React.FC = () => {
   const navigation = useNavigation();
   const { colors, isDark } = useTheme();
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector((state) => state.auth);
 
-  const [contactName, setContactName] = useState('Pooja Kumar');
-  const [relation, setRelation] = useState('Sister');
-  const [phoneNumber, setPhoneNumber] = useState('+91 98765 00000');
-  const [autoShareRide, setAutoShareRide] = useState(true);
+  const [contactName, setContactName] = useState(
+    storageService.getString('emergency_contact_name') || '',
+  );
+  const [relation, setRelation] = useState(
+    storageService.getString('emergency_contact_relation') || '',
+  );
+  const [phoneNumber, setPhoneNumber] = useState(
+    user?.emergencyContact || storageService.getString('emergency_contact_phone') || '',
+  );
+  const [autoShareRide, setAutoShareRide] = useState(
+    storageService.getString('emergency_auto_share') !== 'false',
+  );
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSaveContact = () => {
-    Alert.alert('Contact Saved', 'Your emergency SOS contact has been updated.', [
-      { text: 'OK', onPress: () => navigation.goBack() },
-    ]);
+  useEffect(() => {
+    if (user?.emergencyContact) {
+      setPhoneNumber(user.emergencyContact);
+    }
+  }, [user]);
+
+  const handleSaveContact = async () => {
+    const trimmedPhone = phoneNumber.trim();
+    if (!trimmedPhone) {
+      toast.showError('Please enter an emergency contact phone number.', 'Required Field');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Save details to local storage
+      storageService.setString('emergency_contact_phone', trimmedPhone);
+      storageService.setString('emergency_contact_name', contactName.trim());
+      storageService.setString('emergency_contact_relation', relation.trim());
+      storageService.setString('emergency_auto_share', autoShareRide ? 'true' : 'false');
+
+      // Send ONLY emergencyContact to the profile update API
+      await dispatch(
+        updateProfile({
+          emergencyContact: trimmedPhone,
+        }),
+      ).unwrap();
+
+      toast.showSuccess('Your emergency SOS contact has been updated.', 'Contact Saved');
+      navigation.goBack();
+    } catch (err: any) {
+      toast.showError(err || 'Failed to save emergency contact. Please try again.', 'Update Failed');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleTestCall = () => {
-    Alert.alert('Test Emergency Call', `Calling ${contactName} (${phoneNumber})...`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Call Now',
-        onPress: () => {
-          Linking.openURL(`tel:${phoneNumber.replace(/\s+/g, '')}`).catch(() => {});
-        },
+    const cleanPhone = phoneNumber.replace(/\s+/g, '');
+    if (!cleanPhone) {
+      toast.showError('Please enter a phone number first.', 'No Number');
+      return;
+    }
+    confirmDialog.show({
+      title: 'Test Emergency Call',
+      message: `Do you want to place a call to ${contactName || 'Emergency Contact'} (${phoneNumber})?`,
+      confirmText: 'Call Now',
+      cancelText: 'Cancel',
+      icon: 'phone',
+      onConfirm: () => {
+        Linking.openURL(`tel:${cleanPhone}`).catch(() => {});
       },
-    ]);
+    });
   };
 
   return (
@@ -205,12 +258,17 @@ export const EmergencyContactScreen: React.FC = () => {
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={handleSaveContact}
+          disabled={isSaving}
           style={{ backgroundColor: colors.primary }}
           className="w-full py-4 px-6 rounded-xl items-center justify-center shadow-md"
         >
-          <Text className="text-white text-base font-extrabold tracking-wide">
-            Save Emergency Contact
-          </Text>
+          {isSaving ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text className="text-white text-base font-extrabold tracking-wide">
+              Save Emergency Contact
+            </Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

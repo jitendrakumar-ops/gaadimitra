@@ -1,21 +1,24 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
   Image,
-  Alert,
   Linking,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types/navigation';
-import { BookedRide, RideStatus, ridesService } from '../../services/rides';
-import {
-  PhoneIcon,
-} from '../../assets/icons/Icons';
+import { PhoneIcon } from '../../assets/icons/Icons';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector } from '../../store';
+import { fetchBookings } from '../../store/slices/bookingSlice';
+import { confirmDialog } from '../../components/common/CustomAlertModal';
+
+type FilterKey = 'all' | 'completed' | 'cancelled';
 
 interface MyRidesViewProps {
   onBookRidePress?: () => void;
@@ -24,69 +27,75 @@ interface MyRidesViewProps {
 export const MyRidesView: React.FC<MyRidesViewProps> = ({ onBookRidePress }) => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
-  const [selectedFilter, setSelectedFilter] = useState<'all' | RideStatus>('all');
-  const [ridesList, setRidesList] = useState<BookedRide[]>(ridesService.getAllRides());
+  const dispatch = useAppDispatch();
+  const { bookingsList, bookingsMeta, isLoadingBookings } = useAppSelector((s) => s.bookings);
 
-  const filterTabs: { key: 'all' | RideStatus; label: string; count: number }[] = [
-    { key: 'all', label: 'All', count: ridesList.length },
-    { key: 'active', label: 'Active', count: ridesList.filter(r => r.status === 'active').length },
-    { key: 'pending', label: 'Pending', count: ridesList.filter(r => r.status === 'pending').length },
-    { key: 'completed', label: 'Completed', count: ridesList.filter(r => r.status === 'completed').length },
-    { key: 'cancelled', label: 'Cancelled', count: ridesList.filter(r => r.status === 'cancelled').length },
-  ];
+  const [selectedFilter, setSelectedFilter] = useState<FilterKey>('all');
+  const [refreshing, setRefreshing] = useState(false);
 
-  const displayedRides = selectedFilter === 'all'
-    ? ridesList
-    : ridesList.filter(r => r.status === selectedFilter);
+  /** Load first page, optionally resetting list */
+  const load = useCallback(
+    (reset = true) => {
+      dispatch(fetchBookings({
+        page: 1,
+        limit: 10,
+        status: selectedFilter === 'all' ? undefined : selectedFilter,
+        reset,
+      }));
+    },
+    [dispatch, selectedFilter],
+  );
 
-  const handleCallDriver = (ride: BookedRide) => {
-    Alert.alert('Call Driver', `Calling ${ride.driver.name} at ${ride.driver.phone}...`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Call',
-        onPress: () => {
-          Linking.openURL(`tel:${ride.driver.phone}`).catch(() => {});
-        },
-      },
-    ]);
+  useEffect(() => {
+    load(true);
+  }, [load]);
+
+
+
+
+  const loadMore = () => {
+    if (isLoadingBookings || !bookingsMeta.hasMore) return;
+    dispatch(fetchBookings({
+      page: bookingsMeta.page + 1,
+      limit: bookingsMeta.limit,
+      status: selectedFilter === 'all' ? undefined : selectedFilter,
+      reset: false,
+    }));
   };
 
-  const handleViewRideDetails = (ride: BookedRide) => {
-    navigation.navigate('RideDetails', {
-      driver: ride.driver,
-      agreedFare: ride.agreedFare,
-      tripInfo: ride.tripInfo,
-      bookingId: ride.bookingId,
-      status: ride.status.charAt(0).toUpperCase() + ride.status.slice(1),
+
+  const filterTabs: { key: FilterKey; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'completed', label: 'Completed' },
+    { key: 'cancelled', label: 'Cancelled' },
+  ];
+
+  const handleCallDriver = (ride: any) => {
+    const phone = ride.userId?.phone || ride.driverId?.phone;
+    const name = ride.userId?.name || ride.driverId?.name || 'Driver';
+    if (!phone) return;
+
+    confirmDialog.show({
+      title: 'Call Driver',
+      message: `Do you want to call ${name} (${phone})?`,
+      confirmText: 'Call Now',
+      cancelText: 'Cancel',
+      icon: 'phone',
+      onConfirm: () => {
+        Linking.openURL(`tel:${phone}`).catch(() => {});
+      },
     });
   };
 
-  const handleRebook = (ride?: BookedRide) => {
-    if (onBookRidePress) {
-      onBookRidePress();
-    } else {
-      navigation.navigate('ChooseVehicle', {
-        selectedCity: ride?.tripInfo.pickupLocation || 'Patna Junction, Patna',
-      });
-    }
+  const handleViewRideDetails = (ride: any) => {
+    navigation.navigate('RideDetails', {
+
+      bookingId: ride._id || ride.bookingId || ride.id,
+    });
   };
 
-  const renderStatusBadge = (status: RideStatus) => {
+  const renderStatusBadge = (status: string) => {
     switch (status) {
-      case 'active':
-        return (
-          <View className="px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 flex-row items-center">
-            <View className="w-1.5 h-1.5 rounded-full bg-blue-600 mr-1.5" />
-            <Text className="text-[11px] font-bold text-blue-700">Active</Text>
-          </View>
-        );
-      case 'pending':
-        return (
-          <View className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 flex-row items-center">
-            <View className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5" />
-            <Text className="text-[11px] font-bold text-amber-700">Pending</Text>
-          </View>
-        );
       case 'completed':
         return (
           <View className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 flex-row items-center">
@@ -101,12 +110,19 @@ export const MyRidesView: React.FC<MyRidesViewProps> = ({ onBookRidePress }) => 
             <Text className="text-[11px] font-bold text-red-700">Cancelled</Text>
           </View>
         );
+      default:
+        return (
+          <View className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 flex-row items-center">
+            <View className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5" />
+            <Text className="text-[11px] font-bold text-amber-700">Pending</Text>
+          </View>
+        );
     }
   };
 
   return (
     <View className="w-full">
-      {/* 1. Filter Horizontal Tabs */}
+      {/* Filter Tabs */}
       <View className="mb-3.5">
         <ScrollView
           horizontal
@@ -126,205 +142,141 @@ export const MyRidesView: React.FC<MyRidesViewProps> = ({ onBookRidePress }) => 
                 }}
                 className="h-9 px-3.5 mr-2 rounded-xl flex-row items-center border"
               >
-                <Text
-                  style={{
-                    color: isSelected ? '#FFFFFF' : colors.text,
-                  }}
-                  className="text-xs font-bold"
-                >
+                <Text style={{ color: isSelected ? '#FFFFFF' : colors.text }} className="text-xs font-bold">
                   {tab.label}
                 </Text>
-                {tab.count > 0 && (
-                  <View
-                    style={{
-                      backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : colors.surface,
-                    }}
-                    className="ml-1.5 px-1.5 py-0.5 rounded-full"
-                  >
-                    <Text
-                      style={{
-                        color: isSelected ? '#FFFFFF' : colors.textSecondary,
-                      }}
-                      className="text-[10px] font-extrabold"
-                    >
-                      {tab.count}
-                    </Text>
-                  </View>
-                )}
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
 
-      {/* 2. List of Filtered Rides */}
-      {displayedRides.length === 0 ? (
+      {/* Loading skeleton on first load */}
+      {isLoadingBookings && bookingsList.length === 0 ? (
+        <View className="items-center py-10">
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold mt-3">
+            Loading your rides...
+          </Text>
+        </View>
+      ) : bookingsList.length === 0 ? (
         <View
-          style={{
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-          }}
+          style={{ backgroundColor: colors.card, borderColor: colors.border }}
           className="rounded-xl border p-8 items-center justify-center my-3"
         >
-          <View
-            style={{ backgroundColor: colors.surface }}
-            className="w-14 h-14 rounded-full items-center justify-center mb-3"
-          >
-            <Text className="text-2xl">🚗</Text>
-          </View>
-          <Text
-            style={{ color: colors.text }}
-            className="text-base font-extrabold mb-1"
-          >
+          <Text className="text-2xl mb-2">🚗</Text>
+          <Text style={{ color: colors.text }} className="text-base font-extrabold mb-1">
             No {selectedFilter !== 'all' ? selectedFilter : ''} rides found
           </Text>
-          <Text
-            style={{ color: colors.textSecondary }}
-            className="text-xs text-center mb-5 leading-relaxed"
-          >
+          <Text style={{ color: colors.textSecondary }} className="text-xs text-center mb-5 leading-relaxed">
             Your booked intercity and local rides will appear here in real time.
           </Text>
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => handleRebook()}
-            style={{ backgroundColor: colors.primary }}
-            className="px-6 py-3 rounded-xl"
-          >
-            <Text className="text-white text-xs font-extrabold">Book a New Ride</Text>
-          </TouchableOpacity>
+
         </View>
       ) : (
         <View className="pb-4">
-          {displayedRides.map(ride => (
+          {bookingsList.map((ride, index) => (
             <TouchableOpacity
-              key={ride.id}
+              key={ride._id || ride.id || ride.bookingNumber || index}
               activeOpacity={0.7}
               onPress={() => handleViewRideDetails(ride)}
-              style={{
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              }}
+              style={{ backgroundColor: colors.card, borderColor: colors.border }}
               className="rounded-xl border p-4 mb-3.5"
             >
-              {/* Card Header: Booking ID, Date & Status Badge */}
-              <View
-                style={{ borderBottomColor: colors.border }}
-                className="flex-row items-center justify-between pb-3 border-b"
-              >
+              {/* Header */}
+              <View style={{ borderBottomColor: colors.border }} className="flex-row items-center justify-between pb-3 border-b">
                 <View>
-                  <Text
-                    style={{ color: colors.text }}
-                    className="text-xs font-mono font-black"
-                  >
-                    {ride.bookingId}
+                  <Text style={{ color: colors.text }} className="text-xs font-mono font-black">
+                    #{ride.bookingNumber}
                   </Text>
-                  <Text
-                    style={{ color: colors.textSecondary }}
-                    className="text-[11px] font-semibold mt-0.5"
-                  >
-                    {ride.tripInfo.date} • {ride.tripInfo.pickupTime}
+                  <Text style={{ color: colors.textSecondary }} className="text-[11px] font-semibold mt-0.5">
+                    {ride.createdAt}
                   </Text>
                 </View>
-
-                {/* Fare & Status Badge */}
-                <View className="flex-row items-center justify-between">
-                  <Text
-                    style={{
-                      color: colors.text,
-                      borderRightColor: colors.border,
-                    }}
-                    className="text-base font-black border-r pr-2 mt-0.5 mr-2"
-                  >
-                    ₹{ride.agreedFare.toLocaleString('en-IN')}
+                <View className="flex-row items-center">
+                  <Text style={{ color: colors.text, borderRightColor: colors.border }} className="text-base font-black border-r pr-2 mr-2">
+                    ₹{ride.fare.toLocaleString('en-IN')}
                   </Text>
                   {renderStatusBadge(ride.status)}
                 </View>
               </View>
 
-              {/* Driver & Vehicle Row */}
+              {/* Driver row */}
               <View className="flex-row items-center justify-between my-3">
                 <View className="flex-row items-center flex-1">
-                  <Image
-                    source={require('../../assets/images/driver_rahul.jpg')}
-                    style={{ borderColor: colors.border }}
-                    className="w-11 h-11 rounded-full border"
-                    resizeMode="cover"
-                  />
-                  <View className="ml-3 flex-1">
-                    <Text
-                      style={{ color: colors.text }}
-                      className="text-sm font-extrabold"
+                  {ride.userId?.profileImage ? (
+                    <Image
+                      source={{ uri: ride.userId.profileImage }}
+                      style={{ borderColor: colors.border, width: 44, height: 44, borderRadius: 22 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View
+                      style={{ backgroundColor: `${colors.primary}15`, borderColor: colors.border, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1 }}
                     >
-                      {ride.driver.name}
-                    </Text>
+                      <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '800' }}>
+                        {ride.userId.name.charAt(0)}
+                      </Text>
+                    </View>
+                  )}
+                  <View className="ml-3 flex-1">
+                    <Text style={{ color: colors.text }} className="text-sm font-extrabold">{ride.userId.name}</Text>
                     <View className="flex-row items-center mt-0.5">
                       <Text className="text-xs font-bold text-amber-500 mr-1">★</Text>
-                      <Text
-                        style={{ color: colors.text }}
-                        className="text-xs font-bold"
-                      >
-                        {ride.driver.rating}
-                      </Text>
-                      <Text
-                        style={{ color: colors.textSecondary }}
-                        className="text-xs font-semibold ml-2"
-                      >
-                        • {ride.driver.vehicleModel}
-                      </Text>
+                      <Text style={{ color: colors.text }} className="text-xs font-bold">{ride.driverId.rating}</Text>
+                      {ride.driverId.vehicleModel ? (
+                        <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold ml-2">
+                          • {ride.driverId.vehicleModel}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 </View>
-
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => handleCallDriver(ride)}
-                  style={{
-                    backgroundColor: `${colors.primary}15`,
-                    borderColor: `${colors.primary}40`,
-                  }}
-                  className="w-9 h-9 rounded-full border items-center justify-center ml-2"
-                >
-                  <PhoneIcon size={16} color={colors.primary} />
-                </TouchableOpacity>
+                {ride.userId.phone ? (
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => handleCallDriver(ride)}
+                    style={{ backgroundColor: `${colors.primary}15`, borderColor: `${colors.primary}40` }}
+                    className="w-9 h-9 rounded-full border items-center justify-center ml-2"
+                  >
+                    <PhoneIcon size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
 
-              {/* Route Timeline Box */}
-              <View
-                style={{
-                  backgroundColor: colors.surface,
-                  borderColor: colors.border,
-                }}
-                className="rounded-xl p-3 border mb-1"
-              >
+              {/* Route */}
+              <View style={{ backgroundColor: colors.surface, borderColor: colors.border }} className="rounded-xl p-3 border mb-1">
                 <View className="flex-row items-center mb-2">
-                  <View
-                    style={{ backgroundColor: colors.primary }}
-                    className="w-2 h-2 rounded-full mr-2.5"
-                  />
-                  <Text
-                    style={{ color: colors.text }}
-                    className="text-xs font-bold flex-1"
-                    numberOfLines={1}
-                  >
-                    {ride.tripInfo.pickupLocation}
+                  <View style={{ backgroundColor: colors.primary }} className="w-2 h-2 rounded-full mr-2.5" />
+                  <Text style={{ color: colors.text }} className="text-xs font-bold flex-1" numberOfLines={1}>
+                    {ride.pickupLocation.title}
                   </Text>
                 </View>
                 <View className="flex-row items-center">
-                  <View
-                    style={{ backgroundColor: colors.error }}
-                    className="w-2 h-2 rounded-full mr-2.5"
-                  />
-                  <Text
-                    style={{ color: colors.text }}
-                    className="text-xs font-bold flex-1"
-                    numberOfLines={1}
-                  >
-                    {ride.tripInfo.destination}
+                  <View style={{ backgroundColor: colors.error }} className="w-2 h-2 rounded-full mr-2.5" />
+                  <Text style={{ color: colors.text }} className="text-xs font-bold flex-1" numberOfLines={1}>
+                    {ride.dropLocation.title}
                   </Text>
                 </View>
               </View>
             </TouchableOpacity>
           ))}
+
+          {/* Load More */}
+          {bookingsMeta.hasMore && (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={loadMore}
+              style={{ borderColor: colors.border }}
+              className="py-3 rounded-xl border items-center mt-1"
+            >
+              {isLoadingBookings ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Text style={{ color: colors.primary }} className="text-xs font-bold">Load More</Text>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </View>

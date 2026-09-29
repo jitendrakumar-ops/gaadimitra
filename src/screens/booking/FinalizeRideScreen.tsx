@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -22,6 +23,7 @@ import {
 import { HeaderBar } from '../../components/common/HeaderBar';
 import { Input } from '../../components/common/Input';
 import { DriverSummaryCard } from '../../components/booking/DriverSummaryCard';
+import { toast } from '../../components/common/ToastNotification';
 import { InfoNoteBox } from '../../components/booking/InfoNoteBox';
 import {
   CheckCircleIcon,
@@ -30,109 +32,150 @@ import {
   FlagIcon,
   SearchIcon,
 } from '../../assets/icons/Icons';
-import { detectCurrentLocationWithGps } from '../../utils/mapConfig';
+import {
+  detectCurrentLocationWithGps,
+  searchPlacesWithGoogle,
+  getPlaceCoordinates,
+  geocodeAddress,
+  PlacePrediction,
+} from '../../utils/mapConfig';
 import { useTheme } from '../../theme';
+import { useAppSelector } from '../../store';
 
 export const FinalizeRideScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<FinalizeRideScreenNavigationProp>();
   const route = useRoute<FinalizeRideScreenRouteProp>();
 
-  const driver: DriverInfo = route.params?.driver || {
-    id: 'drv_1',
-    name: 'Rahul Kumar',
-    phone: '+919876543210',
-    rating: '4.8',
-    totalRides: 286,
-    experienceYears: 5,
-    distance: '1.2 km away',
-    isVerified: true,
-    vehicleModel: 'Maruti Dzire',
-    vehicleType: 'Car',
-    vehiclePlate: 'BR01AB1234',
-    hasAc: true,
-    seatingCapacity: '4 Seats',
-    pricePerKm: '₹14 / km',
-  };
+  const { selectedDriver } = useAppSelector((state) => state.drivers);
 
-  const tripInfo: TripInfoData = route.params?.tripInfo || {
-    pickupLocation: 'Patna Junction',
-    destination: 'Gaya',
-    date: '15 Aug 2026',
-    pickupTime: '5:00 PM',
-    passengers: '4 People',
-    vehicleModel: driver.vehicleModel || 'Maruti Dzire',
-  };
+  const driver: DriverInfo | null = React.useMemo(() => {
+    if (route.params?.driver) {
+      return route.params.driver;
+    }
+    if (selectedDriver) {
+      const vehicle = typeof selectedDriver.vehicleId === 'object' ? selectedDriver.vehicleId : null;
+      return {
+        id: selectedDriver._id || selectedDriver.id || '',
+        name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
+        phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
+        profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
+        rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
+        totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
+        experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,
+        distance: selectedDriver.distanceKm ? `${selectedDriver.distanceKm} km away` : 'Nearby',
+        isVerified: Boolean(selectedDriver.isVerified ?? true),
+        vehicleModel: selectedDriver.vehicleModel || 'Vehicle',
+        vehicleType: selectedDriver.type || vehicle?.type || 'Car',
+        vehiclePlate: selectedDriver.vehicleNo || 'Not Registered',
+        hasAc: Boolean(selectedDriver.type),
+        seatingCapacity: selectedDriver.seating ?? `${selectedDriver.seating} Seats`,
+        driverVehicleImg: selectedDriver.vehicleImages,
+        vehicleImage: (selectedDriver.vehicleImages && selectedDriver.vehicleImages.length > 0)
+          ? selectedDriver.vehicleImages[0]
+          : (vehicle?.image || null),
+      };
+    }
+    return null;
+  }, [route.params?.driver, selectedDriver]);
+
+  const incomingTripInfo = route.params?.tripInfo;
 
   const [fareText, setFareText] = useState('');
-  const [pickupLocation, setPickupLocation] = useState('');
-  const [dropLocation, setDropLocation] = useState('');
+  const [pickupLocation, setPickupLocation] = useState(
+    incomingTripInfo?.pickupLocation || route.params?.selectedCity || ''
+  );
+  const [dropLocation, setDropLocation] = useState(incomingTripInfo?.destination || '');
+  const [pickupCoords, setPickupCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [dropCoords, setDropCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationType, setLocationType] = useState<'pickup' | 'drop' | null>(null);
   const [locationQuery, setLocationQuery] = useState('');
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+  const [placePredictions, setPlacePredictions] = useState<PlacePrediction[]>([]);
+
   const agreedFare = parseInt(fareText, 10) || 0;
   const isFormValid = pickupLocation.trim().length > 0 && dropLocation.trim().length > 0 && agreedFare > 0;
 
-  const locationOptions = [
-    'Patna Junction, Patna',
-    'Bailey Road, Patna',
-    'Kankarbagh, Patna',
-    'Boring Road, Patna',
-    'Patna Airport (PAT)',
-    'Gaya Junction, Gaya',
-    'Muzaffarpur City',
-    'Bhagalpur Station',
-    'Connaught Place, New Delhi',
-    'IGI Airport T3, New Delhi',
-    'Sector 18, Noida',
-    'Varanasi Cantt, Varanasi',
-  ];
+  // Live dynamic Google Places Autocomplete search (no static/default list)
+  useEffect(() => {
+    if (!locationQuery.trim() || locationQuery.trim().length < 2) {
+      setPlacePredictions([]);
+      setIsSearchingPlaces(false);
+      return;
+    }
 
-  const filteredLocations = useMemo(() => {
-    const query = locationQuery.trim().toLowerCase();
-    return query
-      ? locationOptions.filter(location => location.toLowerCase().includes(query))
-      : locationOptions;
+    setIsSearchingPlaces(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchPlacesWithGoogle(locationQuery.trim());
+        setPlacePredictions(results);
+      } catch (err) {
+        console.warn('Google Places autocomplete search error:', err);
+      } finally {
+        setIsSearchingPlaces(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
   }, [locationQuery]);
 
   const closeLocationPicker = () => {
     setLocationType(null);
     setLocationQuery('');
+    setPlacePredictions([]);
   };
 
-  const selectLocation = (location: string) => {
+  const selectLocation = (location: string, coords?: { latitude: number; longitude: number } | null) => {
     if (locationType === 'pickup') {
       setPickupLocation(location);
+      if (coords) setPickupCoords(coords);
     } else {
       setDropLocation(location);
+      if (coords) setDropCoords(coords);
     }
     closeLocationPicker();
+  };
+
+  const selectPrediction = async (prediction: PlacePrediction) => {
+    const locName = prediction.description;
+    const coords = await getPlaceCoordinates(prediction.placeId, locName);
+    selectLocation(locName, coords);
   };
 
   const handleUseCurrentLocation = async () => {
     setIsDetectingLocation(true);
     try {
       const geo = await detectCurrentLocationWithGps();
-      selectLocation(geo.shortLocation);
+      selectLocation(geo.shortLocation, geo.coordinates);
     } catch {
-      Alert.alert('Location Error', 'Could not detect your location. Please search and select a place.');
+      toast.showError('Could not detect your location. Please search and select a place.', 'Location Error');
     } finally {
       setIsDetectingLocation(false);
     }
   };
 
   const handleConfirmRide = () => {
-    if (!isFormValid) {
+    if (!isFormValid || !driver) {
       return;
     }
+
+    const now = new Date();
+    const formattedDate = incomingTripInfo?.date || now.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const formattedTime = incomingTripInfo?.pickupTime || now.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
 
     navigation.navigate('TripDetails', {
       driver,
       tripInfo: {
-        ...tripInfo,
-        pickupLocation,
-        destination: dropLocation,
+        pickupLocation: pickupLocation.trim(),
+        destination: dropLocation.trim(),
+        date: formattedDate,
+        pickupTime: formattedTime,
+        passengers: incomingTripInfo?.passengers || driver.seatingCapacity || '4 People',
+        vehicleModel: driver.vehicleModel || 'Vehicle',
       },
+      pickupCoords: pickupCoords || undefined,
+      dropCoords: dropCoords || undefined,
       agreedFare,
       selectedCity: route.params?.selectedCity,
     });
@@ -143,6 +186,36 @@ export const FinalizeRideScreen: React.FC = () => {
       selectedCity: route.params?.selectedCity,
     });
   };
+
+  if (!driver) {
+    return (
+      <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.background}
+        />
+        <HeaderBar
+          onBackPress={() => navigation.goBack()}
+          title="Finalize Ride"
+          className="border-b"
+          style={{ borderBottomColor: colors.border }}
+        />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text style={{ color: colors.text }} className="text-base font-bold text-center">
+            No driver selected
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate('NearbyDrivers', { selectedCity: route.params?.selectedCity })}
+            style={{ backgroundColor: colors.primary }}
+            className="mt-4 px-6 py-2.5 rounded-xl"
+          >
+            <Text className="text-white font-bold text-sm">Find Nearby Drivers</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-between">
@@ -358,12 +431,25 @@ export const FinalizeRideScreen: React.FC = () => {
               <TextInput
                 value={locationQuery}
                 onChangeText={setLocationQuery}
-                placeholder="Search city, station, area..."
+                placeholder="Search city, station, airport, area..."
                 placeholderTextColor={colors.placeholder}
                 autoCorrect={false}
                 style={{ color: colors.text }}
                 className="flex-1 ml-2.5 text-sm font-semibold h-full p-0"
               />
+              {isSearchingPlaces ? (
+                <ActivityIndicator size="small" color={colors.primary} className="mr-1" />
+              ) : locationQuery.length > 0 ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    setLocationQuery('');
+                    setPlacePredictions([]);
+                  }}
+                  className="p-1"
+                >
+                  <Text style={{ color: colors.placeholder }} className="text-xs font-bold">✕</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             {locationType === 'pickup' && (
@@ -378,11 +464,15 @@ export const FinalizeRideScreen: React.FC = () => {
                 className="flex-row items-center p-3 mb-2 rounded-xl border"
               >
                 <View style={{ backgroundColor: colors.primary }} className="w-8 h-8 rounded-full items-center justify-center mr-2.5">
-                  <LocationMarkerIcon size={16} color="#FFFFFF" />
+                  {isDetectingLocation ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <LocationMarkerIcon size={16} color="#FFFFFF" />
+                  )}
                 </View>
                 <View className="flex-1">
                   <Text style={{ color: colors.primary }} className="text-xs font-bold">
-                    {isDetectingLocation ? 'Detecting location...' : 'Use current GPS location'}
+                    {isDetectingLocation ? 'Detecting GPS Location via Google Maps...' : 'Use Current GPS Location'}
                   </Text>
                   <Text style={{ color: colors.textSecondary }} className="text-[11px]">
                     Detect your pickup point automatically
@@ -391,37 +481,81 @@ export const FinalizeRideScreen: React.FC = () => {
               </TouchableOpacity>
             )}
 
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {filteredLocations.map(location => {
-                const isSelected = location === (locationType === 'pickup' ? pickupLocation : dropLocation);
-                return (
-                  <TouchableOpacity
-                    key={location}
-                    activeOpacity={0.7}
-                    onPress={() => selectLocation(location)}
-                    style={{
-                      borderBottomColor: colors.border,
-                      backgroundColor: isSelected ? `${colors.primary}18` : 'transparent',
-                    }}
-                    className={`flex-row items-center py-3.5 px-2 border-b ${isSelected ? 'rounded-lg' : ''}`}
-                  >
-                    <LocationMarkerIcon size={18} color={isSelected ? colors.primary : colors.placeholder} />
-                    <Text
-                      style={{
-                        color: isSelected ? colors.primary : colors.text,
-                      }}
-                      className={`text-sm ml-3 flex-1 ${isSelected ? 'font-bold' : 'font-semibold'}`}
-                    >
-                      {location}
+            {locationQuery.trim().length >= 2 ? (
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {isSearchingPlaces && placePredictions.length === 0 ? (
+                  <View className="py-8 items-center justify-center">
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold mt-2">
+                      Searching Google Maps...
                     </Text>
-                    {isSelected && <CheckCircleIcon size={16} color={colors.primary} />}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+                  </View>
+                ) : placePredictions.length === 0 ? (
+                  <View className="py-6 items-center justify-center px-4">
+                    <Text style={{ color: colors.textSecondary }} className="text-xs text-center mb-3">
+                      No Google Maps results found for "{locationQuery.trim()}".
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        geocodeAddress(locationQuery.trim());
+                        selectLocation(locationQuery.trim());
+                      }}
+                      style={{ backgroundColor: colors.primary }}
+                      className="px-5 py-2.5 rounded-xl"
+                    >
+                      <Text className="text-white text-xs font-bold">Use "{locationQuery.trim()}" directly</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={{ color: colors.textSecondary }} className="text-[11px] font-bold uppercase tracking-wider mb-2 px-1">
+                      Google Maps Suggestions
+                    </Text>
+                    {placePredictions.map(pred => {
+                      const isSelected = pred.description === (locationType === 'pickup' ? pickupLocation : dropLocation);
+                      return (
+                        <TouchableOpacity
+                          key={pred.placeId}
+                          activeOpacity={0.7}
+                          onPress={() => selectPrediction(pred)}
+                          style={{
+                            borderBottomColor: colors.border,
+                            backgroundColor: isSelected ? `${colors.primary}18` : 'transparent',
+                          }}
+                          className={`flex-row items-center py-3.5 px-2 border-b ${isSelected ? 'rounded-lg' : ''}`}
+                        >
+                          <LocationMarkerIcon size={18} color={isSelected ? colors.primary : colors.placeholder} />
+                          <View className="flex-1 ml-3 pr-2">
+                            <Text
+                              style={{ color: isSelected ? colors.primary : colors.text }}
+                              className={`text-sm ${isSelected ? 'font-bold' : 'font-semibold'}`}
+                              numberOfLines={1}
+                            >
+                              {pred.mainText}
+                            </Text>
+                            {pred.secondaryText ? (
+                              <Text style={{ color: colors.textSecondary }} className="text-xs mt-0.5" numberOfLines={1}>
+                                {pred.secondaryText}
+                              </Text>
+                            ) : null}
+                          </View>
+                          {isSelected && <CheckCircleIcon size={16} color={colors.primary} />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </>
+                )}
+              </ScrollView>
+            ) : (
+              <View className="py-8 items-center justify-center px-4">
+                <Text style={{ color: colors.textSecondary }} className="text-xs text-center leading-relaxed">
+                  Type 2 or more characters in the search bar above to search any city, landmark, or address in India live on Google Maps.
+                </Text>
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>

@@ -1,7 +1,8 @@
 /**
  * Base API Client Configuration & Helpers
- * Ready for future backend integration (e.g., Axios / Fetch wrapper)
+ * Connects to GaadiMitra Express Backend (default port 5001)
  */
+import { storageService } from './storage';
 
 export interface RequestConfig extends RequestInit {
   baseUrl?: string;
@@ -15,22 +16,41 @@ declare const process: {
   };
 };
 
-// Configurable base URL (can be read from env in production)
-export const API_BASE_URL = (typeof process !== 'undefined' && process.env?.API_BASE_URL) || 'https://api.gaadimitra.com/v1';
+export const DEFAULT_API_BASE_URL =
+  (typeof process !== 'undefined' && process.env?.API_BASE_URL) ||
+  'http://localhost:5001/api/v1';
+
+let currentBaseUrl = "https://gaadimitraadmin.topxbet.live/api/v1";
+// let currentBaseUrl = DEFAULT_API_BASE_URL;
+let onUnauthorizedCallback: (() => void) | null = null;
+
+export const setOnUnauthorizedCallback = (cb: () => void) => {
+  onUnauthorizedCallback = cb;
+};
+
+export const setApiBaseUrl = (url: string) => {
+  currentBaseUrl = url;
+};
+
+export const getApiBaseUrl = () => currentBaseUrl;
 
 export class ApiClient {
   private baseUrl: string;
 
-  constructor(baseUrl: string = API_BASE_URL) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl?: string) {
+    this.baseUrl = baseUrl || currentBaseUrl;
   }
 
   async request<T>(endpoint: string, options: RequestConfig = {}): Promise<T> {
-    const { baseUrl = this.baseUrl, token, headers = {}, ...rest } = options;
+    const baseUrl = options.baseUrl || this.baseUrl || currentBaseUrl;
+    const token = options.token || storageService.getString('access_token');
+    const { headers = {}, ...rest } = options;
     const url = `${baseUrl}${endpoint}`;
 
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
     const defaultHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       Accept: 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(headers as Record<string, string>),
@@ -43,24 +63,47 @@ export class ApiClient {
       });
     }
 
-    const response = await fetch(url, {
-      ...rest,
-      headers: defaultHeaders,
-    });
+    try {
+      const response = await fetch(url, {
+        ...rest,
+        headers: defaultHeaders,
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      if (__DEV__) {
-        console.warn(`❌ [HTTP ${response.status}] ${url}`, errorData);
+      const responseData = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (__DEV__) {
+          console.warn(`❌ [HTTP ${response.status}] ${url}`, responseData);
+        }
+
+        // If unauthorized (token expired / revoked), trigger session reset
+        if (response.status === 401) {
+          if (onUnauthorizedCallback) {
+            onUnauthorizedCallback();
+          }
+        }
+
+        const message =
+          responseData.message ||
+          (responseData.errors && responseData.errors[0]?.message) ||
+          `Request failed with status ${response.status}`;
+        const error = new Error(message) as any;
+        error.status = response.status;
+        error.code = responseData.code;
+        error.data = responseData;
+        throw error;
       }
-      throw new Error(errorData.message || `Request failed with status ${response.status}`);
-    }
 
-    const data = await response.json();
-    if (__DEV__) {
-      console.log(`✅ [HTTP ${response.status}] ${url}`, data);
+      if (__DEV__) {
+        console.log(`✅ [HTTP ${response.status}] ${url}`, responseData);
+      }
+      return responseData;
+    } catch (err: any) {
+      if (__DEV__) {
+        console.warn(`⚠️ [API Error] ${url}:`, err.message);
+      }
+      throw err;
     }
-    return data;
   }
 
   get<T>(endpoint: string, options?: RequestConfig) {
@@ -68,35 +111,35 @@ export class ApiClient {
   }
 
   post<T>(endpoint: string, body?: any, options?: RequestConfig) {
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
     return this.request<T>(endpoint, {
       ...options,
       method: 'POST',
-      body: JSON.stringify(body),
+      body: isFormData ? body : (body !== undefined ? JSON.stringify(body) : undefined),
     });
+  }
+
+  patch<T>(endpoint: string, body?: any, options?: RequestConfig) {
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    return this.request<T>(endpoint, {
+      ...options,
+      method: 'PATCH',
+      body: isFormData ? body : (body !== undefined ? JSON.stringify(body) : undefined),
+    });
+  }
+
+  put<T>(endpoint: string, body?: any, options?: RequestConfig) {
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    return this.request<T>(endpoint, {
+      ...options,
+      method: 'PUT',
+      body: isFormData ? body : (body !== undefined ? JSON.stringify(body) : undefined),
+    });
+  }
+
+  delete<T>(endpoint: string, options?: RequestConfig) {
+    return this.request<T>(endpoint, { ...options, method: 'DELETE' });
   }
 }
 
 export const apiClient = new ApiClient();
-
-/**
- * Test API function that performs a real HTTP request to test Network Tab
- */
-export async function sendTestNetworkRequest(): Promise<{ status: number; data: any }> {
-  const url = 'https://jsonplaceholder.typicode.com/posts';
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=UTF-8',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      title: 'GaadiMitra Network Tab Test',
-      body: 'Network inspection verified successfully!',
-      timestamp: new Date().toISOString(),
-      app: 'GaadiMitra',
-    }),
-  });
-
-  const data = await response.json();
-  return { status: response.status, data };
-}

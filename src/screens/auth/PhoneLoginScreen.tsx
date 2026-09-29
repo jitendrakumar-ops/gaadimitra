@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Platform,
   ScrollView,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -19,34 +20,65 @@ import {
   AlertCircleIcon,
 } from '../../assets/icons/Icons';
 import { Button } from '../../components/common/Button';
+import { toast } from '../../components/common/ToastNotification';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector, sendOtp, clearError } from '../../store';
 
 export const PhoneLoginScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<PhoneLoginScreenNavigationProp>();
+  const dispatch = useAppDispatch();
+  const { isLoading, error: reduxError } = useAppSelector((state) => state.auth);
+
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    dispatch(clearError());
+  }, [dispatch]);
 
   const handlePhoneChange = (text: string) => {
     const numeric = text.replace(/\D/g, '').slice(0, 10);
     setPhoneNumber(numeric);
-    if (error) {
-      setError(null);
+    if (localError) {
+      setLocalError(null);
+    }
+    if (reduxError) {
+      dispatch(clearError());
     }
   };
 
-  const handleContinue = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
+  const handleContinue = async () => {
+    if (phoneNumber.length !== 10) {
+      setLocalError('Please enter a valid 10-digit mobile number');
+      return;
+    }
+
+    setLocalError(null);
+    const fullPhone = `+91${phoneNumber}`;
+
+    try {
+      const result = await dispatch(
+        sendOtp({
+          phone: fullPhone,
+          role: 'user',
+        })
+      ).unwrap();
+
       navigation.navigate('VerifyOtp', {
         phoneNumber,
         countryCode: '+91',
+        devOtp: result.devOtp,
       });
-    }, 400);
+    } catch (err: any) {
+      const message = typeof err === 'string' ? err : err?.message || 'Failed to send OTP. Please check your network and backend server.';
+      setLocalError(message);
+      toast.showError(message, 'Unable to Send OTP');
+    }
   };
+
+  const displayError = localError || reduxError;
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
@@ -91,8 +123,8 @@ export const PhoneLoginScreen: React.FC = () => {
             <View className="w-full">
               <View
                 style={{
-                  borderColor: error ? colors.error : isFocused ? colors.primary : colors.border,
-                  backgroundColor: error ? `${colors.error}15` : isFocused ? colors.card : colors.input,
+                  borderColor: displayError ? colors.error : isFocused ? colors.primary : colors.border,
+                  backgroundColor: displayError ? `${colors.error}15` : isFocused ? colors.card : colors.input,
                 }}
                 className="flex-row items-center border rounded-xl h-14 overflow-hidden"
               >
@@ -126,11 +158,11 @@ export const PhoneLoginScreen: React.FC = () => {
               </View>
 
               {/* Error Message */}
-              {error && (
+              {displayError && (
                 <View className="flex-row items-center mt-2 ml-1">
                   <AlertCircleIcon size={14} color={colors.error} />
                   <Text style={{ color: colors.error }} className="text-xs ml-1.5 font-medium">
-                    {error}
+                    {displayError}
                   </Text>
                 </View>
               )}

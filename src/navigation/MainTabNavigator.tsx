@@ -1,6 +1,7 @@
-import React from 'react';
-import { Pressable } from 'react-native';
+import React, { useEffect } from 'react';
+import { Pressable, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   RideTabIcon,
   MyRidesTabIcon,
@@ -12,6 +13,7 @@ import { HomeDashboardScreen } from '../screens/home/HomeDashboardScreen';
 import { MyRidesScreen } from '../screens/rides/MyRidesScreen';
 import { ContactedDriversScreen } from '../screens/contacted/ContactedDriversScreen';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
+import { setSystemNavigationBarColor } from '../utils/navigationBar';
 
 export type MainTabParamList = {
   Ride: {
@@ -27,7 +29,18 @@ import { useTheme } from '../theme';
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export const MainTabNavigator: React.FC = () => {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+
+  // Sync phone's bottom button navigation bar color with bottom tab bar background
+  useEffect(() => {
+    setSystemNavigationBarColor(colors.card, !isDark);
+  }, [colors.card, isDark]);
+
+  // Handle Android 3-button navigation, gesture pill, and iOS Home Indicator
+  const bottomInset = insets.bottom;
+  const tabHeight = bottomInset > 0 ? 58 + bottomInset : 64;
+  const paddingBottom = bottomInset > 0 ? bottomInset + 2 : 8;
 
   return (
     <Tab.Navigator
@@ -35,15 +48,19 @@ export const MainTabNavigator: React.FC = () => {
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: true,
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
           backgroundColor: colors.card,
           borderTopWidth: 1,
           borderTopColor: colors.border,
-          height: 62,
-          paddingBottom: 8,
+          height: tabHeight,
+          paddingBottom: paddingBottom,
           paddingTop: 6,
+        },
+        tabBarItemStyle: {
+          justifyContent: 'center',
         },
         tabBarLabelStyle: {
           fontSize: 11,

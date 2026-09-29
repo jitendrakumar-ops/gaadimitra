@@ -5,6 +5,9 @@ import {
   ActivityIndicator,
   TouchableOpacityProps,
   View,
+  Platform,
+  StyleProp,
+  TextStyle,
 } from 'react-native';
 import { useTheme } from '../../theme';
 
@@ -15,6 +18,8 @@ export interface ButtonProps extends TouchableOpacityProps {
   loading?: boolean;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
+  textClassName?: string;
+  textStyle?: StyleProp<TextStyle>;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -26,6 +31,8 @@ export const Button: React.FC<ButtonProps> = ({
   leftIcon,
   rightIcon,
   className = '',
+  textClassName = '',
+  textStyle,
   style,
   ...rest
 }) => {
@@ -35,8 +42,8 @@ export const Button: React.FC<ButtonProps> = ({
   // Base sizing classes
   const sizeClasses = {
     sm: 'h-10 px-4 rounded-xl',
-    md: 'h-13 py-3.5 px-6 rounded-xl',
-    lg: 'h-14 py-4 px-8 rounded-xl',
+    md: 'h-13 px-6 rounded-xl',
+    lg: 'h-14 px-8 rounded-xl',
   }[size];
 
   const textSizeClasses = {
@@ -91,11 +98,19 @@ export const Button: React.FC<ButtonProps> = ({
           color={currentStyles.spinner}
         />
       ) : (
-        <View className="flex-row items-center justify-center space-x-2">
+        <View className="flex-row items-center justify-center">
           {leftIcon && <View className="mr-2">{leftIcon}</View>}
           <Text
-            style={[currentStyles.text]}
-            className={`font-semibold ${textSizeClasses} tracking-wide text-center`}
+            style={[
+              currentStyles.text,
+              {
+                includeFontPadding: false,
+                textAlignVertical: 'center',
+                transform: [{ translateY: Platform.OS === 'android' ? -1.5 : -1 }],
+              },
+              textStyle,
+            ]}
+            className={`font-semibold ${textSizeClasses} tracking-wide text-center ${textClassName}`}
           >
             {title}
           </Text>

@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -26,54 +27,170 @@ import {
   PaperPlaneIcon,
 } from '../../assets/icons/Icons';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector } from '../../store';
+import { createBooking } from '../../store/slices/bookingSlice';
+import { toast } from '../../components/common/ToastNotification';
 
 export const TripDetailsScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<TripDetailsScreenNavigationProp>();
   const route = useRoute<TripDetailsScreenRouteProp>();
 
+  const dispatch = useAppDispatch();
   const [isSending, setIsSending] = useState(false);
 
-  const driver: DriverInfo = route.params?.driver || {
-    id: 'drv_1',
-    name: 'Rahul Kumar',
-    phone: '+919876543210',
-    rating: '4.8',
-    totalRides: 286,
-    experienceYears: 5,
-    distance: '1.2 km away',
-    isVerified: true,
-    vehicleModel: 'Maruti Dzire',
-    vehicleType: 'Car',
-    vehiclePlate: 'BR01AB1234',
-    hasAc: true,
-    seatingCapacity: '4 Seats',
-    pricePerKm: '₹14 / km',
-  };
+  const { selectedDriver } = useAppSelector((state) => state.drivers);
 
-  const agreedFare = route.params?.agreedFare || 1500;
+  const driver: DriverInfo | null = React.useMemo(() => {
+    if (route.params?.driver) {
+      return route.params.driver;
+    }
+    if (selectedDriver) {
+      const vehicle = typeof selectedDriver.vehicleId === 'object' ? selectedDriver.vehicleId : null;
+      return {
+        id: selectedDriver._id || selectedDriver.id || '',
+        name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
+        phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
+        profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
+        rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
+        totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
+        experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,
+        distance: selectedDriver.distanceKm ? `${selectedDriver.distanceKm} km away` : 'Nearby',
+        isVerified: Boolean(selectedDriver.isVerified ?? true),
+        vehicleModel: selectedDriver.vehicleModel || 'Vehicle',
+        vehicleType: selectedDriver.type || vehicle?.type || 'Car',
+        vehiclePlate: selectedDriver.vehicleNo || 'Not Registered',
+        hasAc: Boolean(selectedDriver.type),
+        seatingCapacity: selectedDriver.seating ? `${selectedDriver.seating} Seats` : (vehicle?.seat ? `${vehicle.seat} Seats` : '4 Seats'),
+        driverVehicleImg: selectedDriver.vehicleImages,
+        vehicleImage: (selectedDriver.vehicleImages && selectedDriver.vehicleImages.length > 0)
+          ? selectedDriver.vehicleImages[0]
+          : (vehicle?.image || null),
+      };
+    }
+    return null;
+  }, [route.params?.driver, selectedDriver]);
+
+  const agreedFare = route.params?.agreedFare || 0;
 
   const tripInfo: TripInfoData = route.params?.tripInfo || {
-    pickupLocation: 'Patna Junction',
-    destination: 'Gaya',
-    date: '15 Aug 2026',
-    pickupTime: '5:00 PM',
-    passengers: '4 People',
-    vehicleModel: driver.vehicleModel || 'Maruti Dzire',
+    pickupLocation: route.params?.selectedCity || '',
+    destination: '',
+    date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+    pickupTime: new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }),
+    passengers: driver?.seatingCapacity || '4 Seats',
+    vehicleModel: driver?.vehicleModel || '',
   };
 
-  const handleSendRequest = () => {
+  const handleSendRequest = async () => {
+    if (!driver || isSending) {
+      return;
+    }
+
+    const driverId = driver.id || (driver as any)._id;
+    if (!driverId) {
+      toast.showError('Driver ID not found', 'Error');
+      return;
+    }
+
+    const formatLocation = (loc: any) => ({
+      type: 'Point' as const,
+      coordinates: (Array.isArray(loc?.coordinates)
+        ? loc.coordinates
+        : [loc?.longitude || 0, loc?.latitude || 0]) as [number, number],
+      address: loc?.address || (typeof loc === 'string' ? loc : ''),
+      title: loc?.title || loc?.address || (typeof loc === 'string' ? loc : ''),
+    });
+
+    const pickupCoords = route.params?.pickupCoords;
+    const dropCoords = route.params?.dropCoords;
+
+    const pickupParam = pickupCoords
+      ? {
+        longitude: pickupCoords.longitude,
+        latitude: pickupCoords.latitude,
+        address: tripInfo.pickupLocation,
+        title: tripInfo.pickupLocation,
+      }
+      : tripInfo.pickupLocation;
+
+    const dropParam = dropCoords
+      ? {
+        longitude: dropCoords.longitude,
+        latitude: dropCoords.latitude,
+        address: tripInfo.destination,
+        title: tripInfo.destination,
+      }
+      : tripInfo.destination;
+
+    const pickup = formatLocation(pickupParam);
+    const drop = formatLocation(dropParam);
+
     setIsSending(true);
-    setTimeout(() => {
-      setIsSending(false);
+    try {
+      const resultAction = await dispatch(
+        createBooking({
+          driverId,
+          pickupLocation: pickup,
+          dropLocation: drop,
+          fare: agreedFare,
+        })
+      );
+
+      if (createBooking.rejected.match(resultAction)) {
+        toast.showError((resultAction.payload as string) || 'Failed to create booking', 'Booking Error');
+        setIsSending(false);
+        return;
+      }
+
+      const bookingData = resultAction.payload;
+      const createdBookingId =
+        bookingData?._id || bookingData?.bookingId || bookingData?.id || route.params?.bookingId || `#RIDE${Date.now().toString().slice(-5)}`;
+
       navigation.navigate('DriverAccepted', {
-        driver,
+        driver: driver || undefined,
         agreedFare,
         tripInfo,
         bookingToken: 200,
+        bookingId: createdBookingId,
+        status: bookingData?.status || 'requested',
       });
-    }, 600);
+    } catch (err: any) {
+      toast.showError(err.message || 'Failed to create booking', 'Booking Error');
+    } finally {
+      setIsSending(false);
+    }
   };
+
+  if (!driver) {
+    return (
+      <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+          backgroundColor={colors.background}
+        />
+        <HeaderBar
+          onBackPress={() => navigation.goBack()}
+          title="Trip details"
+          className="border-b"
+          style={{ borderBottomColor: colors.border }}
+        />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text style={{ color: colors.text }} className="text-base font-bold text-center">
+            Driver details not found
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => navigation.goBack()}
+            style={{ backgroundColor: colors.primary }}
+            className="mt-4 px-6 py-2.5 rounded-xl"
+          >
+            <Text className="text-white font-bold text-sm">Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-between">

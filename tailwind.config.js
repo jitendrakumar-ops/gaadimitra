@@ -67,6 +67,9 @@ module.exports = {
         '2xl': '16px',
         '3xl': '24px',
       },
+      spacing: {
+        '13': '3.25rem',
+      },
     },
   },
   plugins: [],

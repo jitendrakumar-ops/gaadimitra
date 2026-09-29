@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,19 +9,17 @@ import {
   Alert,
   Linking,
   Share,
+  BackHandler,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import {
-  RideDetailsScreenNavigationProp,
-  RideDetailsScreenRouteProp,
-  DriverInfo,
-  TripInfoData,
-} from '../../types/navigation';
+import { RideDetailsScreenNavigationProp, RideDetailsScreenRouteProp } from '../../types/navigation';
 import {
   PhoneIcon,
   ShareNodesIcon,
-  ProhibitedBanIcon,
+
   LocationMarkerIcon,
   CalendarDateIcon,
   ClockTimeIcon,
@@ -29,352 +27,261 @@ import {
 import { ReportDriverModal } from '../../components/drivers/ReportDriverModal';
 import { HeaderBar } from '../../components/common/HeaderBar';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector } from '../../store';
+import { fetchBookingById, clearSelectedBooking } from '../../store/slices/bookingSlice';
+import { toast } from '../../components/common/ToastNotification';
 
 export const RideDetailsScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<RideDetailsScreenNavigationProp>();
   const route = useRoute<RideDetailsScreenRouteProp>();
+  const dispatch = useAppDispatch();
 
-  const driver: DriverInfo = route.params?.driver || {
-    id: 'drv_1',
-    name: 'Rahul Kumar',
-    phone: '+919876543210',
-    rating: '4.8',
-    totalRides: 286,
-    experienceYears: 5,
-    distance: '1.2 km away',
-    isVerified: true,
-    vehicleModel: 'Maruti Dzire',
-    vehicleType: 'Car',
-    vehiclePlate: 'BR01AB1234',
-    hasAc: true,
-    seatingCapacity: '4 Seats',
-    pricePerKm: '₹14 / km',
-  };
+  const bookingId = route.params?.bookingId;
+  const { selectedBooking, isLoadingBookingDetail, error } = useAppSelector((s) => s.bookings);
 
-  const bookingId = route.params?.bookingId || '#RIDE10245';
-  const agreedFare = route.params?.agreedFare || 1500;
-  const status = route.params?.status || 'Completed';
+  const [refreshing, setRefreshing] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
-  const tripInfo: TripInfoData = route.params?.tripInfo || {
-    pickupLocation: 'Patna Junction',
-    destination: 'Gaya',
-    date: '15 Aug 2026',
-    pickupTime: '5:00 PM',
-    passengers: '4 People',
-    vehicleModel: driver.vehicleModel || 'Maruti Dzire',
-  };
+  useEffect(() => {
+    if (bookingId) dispatch(fetchBookingById(bookingId));
+    return () => {
+      dispatch(clearSelectedBooking());
+    };
+  }, [dispatch, bookingId]);
 
-  const [showReportModal, setShowReportModal] = useState<boolean>(false);
+  const handleRefresh = useCallback(async () => {
+    if (!bookingId) return;
+    setRefreshing(true);
+    await dispatch(fetchBookingById(bookingId));
+    setRefreshing(false);
+  }, [dispatch, bookingId]);
+
+  const handleBack = useCallback(() => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('HomeDashboard', { screen: 'MyRides' } as any);
+  }, [navigation]);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [handleBack]);
 
   const handleCallDriver = () => {
-    Alert.alert('Call Driver', `Calling ${driver.name} (${driver.phone})...`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Call',
-        onPress: () => {
-          Linking.openURL(`tel:${driver.phone}`).catch(() => { });
-        },
-      },
-    ]);
+    const phone = selectedBooking?.userId?.phone;
+    if (!phone) return toast.showError('Driver phone number is not available.', 'Contact Unavailable');
+    Linking.openURL(`tel:${phone}`).catch(() => toast.showError('Unable to initiate call.', 'Error'));
   };
 
-  const handleShareTrip = async () => {
-    try {
-      await Share.share({
-        message: `GaadiMitra Trip Details:\nBooking ID: ${bookingId}\nDriver: ${driver.name} (${driver.phone})\nVehicle: ${driver.vehicleModel} (${driver.vehiclePlate})\nPickup: ${tripInfo.pickupLocation}\nDrop: ${tripInfo.destination}\nFare: ₹${agreedFare}\nStatus: ${status}`,
-      });
-    } catch { }
+  const handleShareTrip = () => {
+    const token = Number(selectedBooking?.tokenMoney ?? selectedBooking?.bookingToken ?? selectedBooking?.tokenAmount ?? selectedBooking?.advanceAmount ?? 0);
+    Share.share({
+      message: `GaadiMitra Ride:\nBooking: #${selectedBooking?.bookingNumber || selectedBooking?._id || bookingId}\nPickup: ${selectedBooking?.pickupLocation?.title || selectedBooking?.pickupLocation?.address || ''}\nDrop: ${selectedBooking?.dropLocation?.title || selectedBooking?.dropLocation?.address || ''}\nFare: ₹${selectedBooking?.fare || 0}${token > 0 ? `\nToken Paid: ₹${token}` : ''}`,
+    }).catch(() => { });
   };
 
-  const handleReportSubmit = (_reason: string) => {
-    Alert.alert(
-      'Report Submitted',
-      'Thank you for reporting. Our support team will investigate this ride.'
-    );
-  };
 
-  const getStatusColor = () => {
-    switch (status.toLowerCase()) {
-      case 'active':
-      case 'in transit':
-      case 'running':
-        return 'text-blue-600';
-      case 'cancelled':
-        return 'text-red-500';
-      case 'completed':
-      default:
-        return 'text-emerald-600';
-    }
-  };
+
+  const status = selectedBooking?.status?.toLowerCase() || 'pending';
+
 
   return (
-    <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-between">
-      <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={colors.background}
-      />
+    <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
+      <HeaderBar onBackPress={handleBack} title="Ride Details" className="border-b" style={{ borderBottomColor: colors.border }} />
 
-      <HeaderBar
-        onBackPress={() => navigation.goBack()}
-        title="Ride details"
-        className="border-b"
-        style={{ borderBottomColor: colors.border }}
-      />
-
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: 20,
-          paddingTop: 16,
-          paddingBottom: 28,
-          flexGrow: 1,
-          justifyContent: 'space-between',
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View>
-          {/* Card 1: Booking ID & Status */}
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            }}
-            className="rounded-xl border p-5 mb-4 flex-row items-center justify-between"
-          >
-            <View>
-              <Text style={{ color: colors.placeholder }} className="text-xs font-semibold">
-                Booking ID
-              </Text>
-              <Text style={{ color: colors.text }} className="text-base font-black mt-0.5 tracking-wide">
-                {bookingId}
-              </Text>
-            </View>
-            <View className="items-end">
-              <Text style={{ color: colors.placeholder }} className="text-xs font-semibold">
-                Status
-              </Text>
-              <Text className={`text-base font-extrabold mt-0.5 ${getStatusColor()}`}>
-                {status}
-              </Text>
-            </View>
-          </View>
-
-          {/* Card 2: Driver & Vehicle Info */}
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            }}
-            className="rounded-xl border p-4 mb-4"
-          >
-            {/* Top Row: Driver Profile */}
-            <View className="flex-row items-center justify-between">
-              <View className="flex-row items-center flex-1">
-                {/* Driver Avatar */}
-                <View
-                  className="overflow-hidden bg-blue-50 border border-blue-100"
-                  style={{ width: 56, height: 56, borderRadius: 28 }}
-                >
-                  <Image
-                    source={require('../../assets/images/driver_rahul.jpg')}
-                    className="w-full h-full"
-                    resizeMode="cover"
-                  />
-                </View>
-
-                {/* Driver Name & Star Rating */}
-                <View className="ml-3.5 flex-1">
-                  <Text style={{ color: colors.text }} className="text-lg font-bold leading-tight">
-                    {driver.name}
+      {isLoadingBookingDetail && !selectedBooking && !refreshing ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold mt-3">Loading details...</Text>
+        </View>
+      ) : error && !selectedBooking ? (
+        <View className="flex-1 items-center justify-center p-6">
+          <Text style={{ color: colors.text }} className="text-base font-bold mb-2">Failed to load booking</Text>
+          <Text style={{ color: colors.textSecondary }} className="text-xs mb-4 text-center">{error}</Text>
+          <TouchableOpacity onPress={() => bookingId && dispatch(fetchBookingById(bookingId))} style={{ backgroundColor: colors.primary }} className="px-5 py-2.5 rounded-xl">
+            <Text className="text-white text-xs font-bold">Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={{ padding: 20, flexGrow: 1, justifyContent: 'space-between' }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
+        >
+          <View>
+            {/* Booking ID & Status */}
+            <View style={{ backgroundColor: colors.card, borderColor: colors.border }} className="rounded-xl border p-4 mb-4 flex-row justify-between items-center">
+              <View>
+                <Text style={{ color: colors.placeholder }} className="text-xs font-medium">Booking ID</Text>
+                <Text style={{ color: colors.text }} className="text-base font-black mt-0.5">
+                  #{selectedBooking?.bookingNumber || selectedBooking?._id?.slice(-6).toUpperCase() || bookingId}
+                </Text>
+              </View>
+              <View className="items-end">
+                <Text style={{ color: colors.placeholder }} className="text-xs font-medium mb-1">Status</Text>
+                <View className={`px-2.5 py-1 rounded-full border ${status === 'completed' ? 'bg-emerald-50 border-emerald-200' : status === 'cancelled' ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+                  <Text className={`text-xs font-extrabold capitalize ${status === 'completed' ? 'text-emerald-700' : status === 'cancelled' ? 'text-red-700' : 'text-blue-700'}`}>
+                    {selectedBooking?.status || 'Pending'}
                   </Text>
-                  <View className="flex-row items-center mt-1">
-                    <Text className="text-amber-500 text-sm mr-1.5">★</Text>
-                    <Text style={{ color: colors.text }} className="text-sm font-bold">
-                      {driver.rating}
+                </View>
+              </View>
+            </View>
+
+            {/* Driver & Vehicle */}
+            <View style={{ backgroundColor: colors.card, borderColor: colors.border }} className="rounded-xl border p-4 mb-4">
+              <View className="flex-row items-center justify-between">
+                <View className="flex-row items-center flex-1">
+                  {selectedBooking?.userId?.profileImage ? (
+                    <Image source={{ uri: selectedBooking.userId.profileImage }} style={{ width: 48, height: 48, borderRadius: 24 }} resizeMode="cover" />
+                  ) : (
+                    <View style={{ backgroundColor: `${colors.primary}15`, width: 48, height: 48, borderRadius: 24 }} className="items-center justify-center">
+                      <Text style={{ color: colors.primary }} className="text-lg font-bold">
+                        {(selectedBooking?.userId?.name || 'D').charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View className="ml-3 flex-1">
+                    <Text style={{ color: colors.text }} className="text-base font-bold" numberOfLines={1}>
+                      {selectedBooking?.userId?.name || 'Driver Not Assigned'}
                     </Text>
+                    {selectedBooking?.driverId?.rating && (
+                      <View className="flex-row items-center mt-0.5">
+                        <Text className="text-amber-500 text-xs mr-1">★</Text>
+                        <Text style={{ color: colors.text }} className="text-xs font-bold">{selectedBooking.driverId.rating}</Text>
+                      </View>
+                    )}
                   </View>
+                </View>
+                {selectedBooking?.userId?.phone && (
+                  <TouchableOpacity onPress={handleCallDriver} style={{ backgroundColor: `${colors.primary}15`, borderColor: `${colors.primary}40` }} className="w-10 h-10 rounded-full border items-center justify-center ml-2">
+                    <PhoneIcon size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View style={{ backgroundColor: colors.border }} className="h-[1px] my-3" />
+
+              <View className="flex-row items-center justify-between">
+                <View className="flex-1 pr-2">
+                  <Text style={{ color: colors.text }} className="text-sm font-bold">
+                    {selectedBooking?.driverId?.vehicleModel || selectedBooking?.serviceId?.title || ''}
+                  </Text>
+                  {selectedBooking?.driverId?.vehicleNo && (
+                    <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold mt-0.5">
+                      {selectedBooking.driverId.vehicleNo}
+                    </Text>
+                  )}
+                </View>
+                {selectedBooking?.vehicleId?.image ? (
+                  <Image source={{ uri: selectedBooking.vehicleId.image }} style={{ width: 80, height: 48 }} resizeMode="contain" />
+                ) : (
+                  <Image source={require('../../assets/images/maruti_dzire_white.jpg')} style={{ width: 80, height: 48 }} resizeMode="contain" />
+                )}
+              </View>
+            </View>
+
+            {/* Trip Details */}
+            <View style={{ backgroundColor: colors.card, borderColor: colors.border }} className="rounded-xl border p-4 mb-4 space-y-3">
+              <View className="flex-row items-start">
+                <LocationMarkerIcon size={18} color="#2563EB" />
+                <View className="ml-3 flex-1">
+                  <Text style={{ color: colors.placeholder }} className="text-[11px] font-medium">Pickup</Text>
+                  <Text style={{ color: colors.text }} className="text-sm font-bold">
+                    {selectedBooking?.pickupLocation?.title || selectedBooking?.pickupLocation?.address || 'N/A'}
+                  </Text>
                 </View>
               </View>
 
-              {/* Call Driver Button */}
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={handleCallDriver}
-                style={{
-                  backgroundColor: colors.surface,
-                  borderColor: colors.border,
-                }}
-                className="w-11 h-11 rounded-full border items-center justify-center ml-2"
-              >
-                <PhoneIcon size={19} color={colors.primary} />
+              <View className="flex-row items-start pt-1">
+                <LocationMarkerIcon size={18} color="#EF4444" />
+                <View className="ml-3 flex-1">
+                  <Text style={{ color: colors.placeholder }} className="text-[11px] font-medium">Destination</Text>
+                  <Text style={{ color: colors.text }} className="text-sm font-bold">
+                    {selectedBooking?.dropLocation?.title || selectedBooking?.dropLocation?.address || 'N/A'}
+                  </Text>
+                </View>
+              </View>
+
+              {selectedBooking?.createdAt && (
+                <View className="flex-row items-center pt-1">
+                  <CalendarDateIcon size={18} color={colors.textSecondary} />
+                  <View className="ml-3 flex-row items-center justify-between flex-1">
+                    <Text style={{ color: colors.text }} className="text-xs font-medium">
+                      {new Date(selectedBooking.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </Text>
+                    <View className="flex-row items-center">
+                      <ClockTimeIcon size={14} color={colors.textSecondary} />
+                      <Text style={{ color: colors.textSecondary }} className="text-xs ml-1">
+                        {new Date(selectedBooking.createdAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              <View className="pt-2 border-t space-y-2" style={{ borderTopColor: colors.border }}>
+                <View className="flex-row items-center justify-between">
+                  <Text style={{ color: colors.placeholder }} className="text-xs font-semibold">Total Fare</Text>
+                  <Text style={{ color: colors.text }} className="text-base font-bold">
+                    ₹{Number(selectedBooking?.fare || 0).toLocaleString('en-IN')}
+                  </Text>
+                </View>
+
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center">
+                    <Text style={{ color: colors.placeholder }} className="text-xs font-semibold">Token Money</Text>
+                    <View className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/40">
+                      <Text className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">Paid</Text>
+                    </View>
+                  </View>
+                  <Text className="text-sm font-bold text-emerald-600">
+                    ₹{Number(selectedBooking?.tokenMoney ?? selectedBooking?.bookingToken ?? selectedBooking?.tokenAmount ?? selectedBooking?.advanceAmount ?? 0).toLocaleString('en-IN')}
+                  </Text>
+                </View>
+
+                {Number(selectedBooking?.tokenMoney ?? selectedBooking?.bookingToken ?? selectedBooking?.tokenAmount ?? selectedBooking?.advanceAmount ?? 0) > 0 && (
+                  <View className="flex-row items-center justify-between pt-1 border-t border-dashed" style={{ borderTopColor: colors.border }}>
+                    <Text style={{ color: colors.placeholder }} className="text-xs font-semibold">Remaining Payable</Text>
+                    <Text style={{ color: colors.text }} className="text-base font-black">
+                      ₹{Math.max(0, Number(selectedBooking?.fare || 0) - Number(selectedBooking?.tokenMoney ?? selectedBooking?.bookingToken ?? selectedBooking?.tokenAmount ?? selectedBooking?.advanceAmount ?? 0)).toLocaleString('en-IN')}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+
+          {/* Action Buttons */}
+          <View className="pt-2">
+            <View className="flex-row items-center mb-3">
+              {selectedBooking?.userId?.phone && (
+                <TouchableOpacity onPress={handleCallDriver} style={{ backgroundColor: colors.primary }} className="flex-1 py-3.5 px-4 rounded-xl flex-row items-center justify-center mr-2">
+                  <PhoneIcon size={18} color="#FFFFFF" />
+                  <Text className="text-white text-sm font-bold ml-2">Call Driver</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={handleShareTrip} style={{ backgroundColor: colors.surface, borderColor: colors.border }} className="flex-1 border py-3.5 px-4 rounded-xl flex-row items-center justify-center">
+                <ShareNodesIcon size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary }} className="text-sm font-bold ml-2">Share Trip</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Subtle Divider */}
-            <View style={{ backgroundColor: colors.border }} className="h-[1px] my-3.5" />
 
-            {/* Bottom Row: Vehicle Model & Photo */}
-            <View className="flex-row items-center justify-between">
-              <View className="flex-1 pr-2">
-                <Text style={{ color: colors.text }} className="text-base font-bold leading-tight">
-                  {driver.vehicleModel}
-                </Text>
-                <Text style={{ color: colors.textSecondary }} className="text-sm font-semibold mt-0.5 tracking-wider">
-                  {driver.vehiclePlate}
-                </Text>
-              </View>
-
-              {/* White Maruti Dzire Car Graphic */}
-              <Image
-                source={require('../../assets/images/maruti_dzire_white.jpg')}
-                style={{ width: 120, height: 68 }}
-                resizeMode="contain"
-              />
-            </View>
-          </View>
-
-          {/* Card 3: Trip Information Table */}
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            }}
-            className="rounded-xl border p-5 mb-5 space-y-4"
-          >
-            {/* Pickup Row */}
-            <View className="flex-row items-start">
-              <View className="items-center mr-3 mt-0.5">
-                <LocationMarkerIcon size={18} color="#2563EB" />
-                <View style={{ borderColor: colors.border }} className="w-0.5 h-6 border-l border-dashed my-0.5" />
-              </View>
-              <View className="flex-row items-center flex-1">
-                <Text style={{ color: colors.placeholder }} className="text-xs font-semibold w-24">
-                  Pickup
-                </Text>
-                <Text style={{ color: colors.text }} className="text-sm font-extrabold flex-1">
-                  {tripInfo.pickupLocation}
-                </Text>
-              </View>
-            </View>
-
-            {/* Destination Row */}
-            <View className="flex-row items-center">
-              <View className="mr-3">
-                <LocationMarkerIcon size={18} color="#EF4444" />
-              </View>
-              <View className="flex-row items-center flex-1">
-                <Text style={{ color: colors.placeholder }} className="text-xs font-semibold w-24">
-                  Destination
-                </Text>
-                <Text style={{ color: colors.text }} className="text-sm font-extrabold flex-1">
-                  {tripInfo.destination}
-                </Text>
-              </View>
-            </View>
-
-            {/* Date Row */}
-            <View className="flex-row items-center pt-1">
-              <View className="mr-3">
-                <CalendarDateIcon size={18} color={colors.textSecondary} />
-              </View>
-              <View className="flex-row items-center flex-1">
-                <Text style={{ color: colors.placeholder }} className="text-xs font-semibold w-24">
-                  Date
-                </Text>
-                <Text style={{ color: colors.text }} className="text-sm font-extrabold flex-1">
-                  {tripInfo.date}
-                </Text>
-              </View>
-            </View>
-
-            {/* Time Row */}
-            <View className="flex-row items-center pt-1">
-              <View className="mr-3">
-                <ClockTimeIcon size={18} color={colors.textSecondary} />
-              </View>
-              <View className="flex-row items-center flex-1">
-                <Text style={{ color: colors.placeholder }} className="text-xs font-semibold w-24">
-                  Time
-                </Text>
-                <Text style={{ color: colors.text }} className="text-sm font-extrabold flex-1">
-                  {tripInfo.pickupTime}
-                </Text>
-              </View>
-            </View>
-
-            {/* Agreed Fare Row */}
-            <View className="flex-row items-center pt-1">
-              <View className="mr-3 w-[18px] items-center">
-                <Text style={{ color: colors.textSecondary }} className="text-base font-bold">₹</Text>
-              </View>
-              <View className="flex-row items-center flex-1">
-                <Text style={{ color: colors.placeholder }} className="text-xs font-semibold w-24">
-                  Agreed Fare
-                </Text>
-                <Text style={{ color: colors.text }} className="text-base font-black flex-1">
-                  ₹ {agreedFare.toLocaleString('en-IN')}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* 2. Action Buttons */}
-        <View className="pt-2">
-          {/* Row 1: Call Driver & Share Trip */}
-          <View className="flex-row items-center mb-3">
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={handleCallDriver}
-              style={{ backgroundColor: colors.primary }}
-              className="flex-1 py-4 px-4 rounded-xl flex-row items-center justify-center mr-2 shadow-md"
-            >
-              <PhoneIcon size={18} color="#FFFFFF" />
-              <Text className="text-white text-base font-bold ml-2">
-                Call Driver
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={handleShareTrip}
-              style={{
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-              }}
-              className="flex-1 border py-4 px-4 rounded-xl flex-row items-center justify-center ml-2"
-            >
-              <ShareNodesIcon size={18} color={colors.primary} />
-              <Text style={{ color: colors.primary }} className="text-base font-bold ml-2">
-                Share Trip
-              </Text>
+            <TouchableOpacity onPress={() => setShowReportModal(true)} style={{ backgroundColor: colors.card, borderColor: colors.border }} className="w-full border py-3 rounded-xl items-center justify-center">
+              <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold">Report Ride Issue</Text>
             </TouchableOpacity>
           </View>
+        </ScrollView>
+      )}
 
-          {/* Row 2: Report Ride */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => setShowReportModal(true)}
-            style={{
-              backgroundColor: `${colors.error}10`,
-              borderColor: `${colors.error}40`,
-            }}
-            className="w-full border py-4 px-6 rounded-xl flex-row items-center justify-center"
-          >
-            <ProhibitedBanIcon size={18} color="#EF4444" />
-            <Text className="text-[#EF4444] text-base font-bold ml-2">
-              Report Ride
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      {/* Report Driver & Ride Modal */}
       <ReportDriverModal
         visible={showReportModal}
-        driverName={driver.name}
+        driverName={selectedBooking?.driverId?.name || 'Driver'}
         onClose={() => setShowReportModal(false)}
-        onSubmit={handleReportSubmit}
+        onSubmit={(_reason) => toast.showSuccess('Thank you for reporting. Our support team will investigate.', 'Report Submitted')}
       />
     </SafeAreaView>
   );

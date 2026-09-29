@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { OnboardingScreenNavigationProp } from '../../types/navigation';
 import { Button } from '../../components/common/Button';
 import { useTheme } from '../../theme';
+import { storageService } from '../../services/storage';
 
 interface SlideItem {
   id: string;
@@ -80,6 +81,7 @@ export const OnboardingScreen: React.FC = () => {
   };
 
   const handleGetStarted = () => {
+    storageService.setString('has_completed_onboarding', 'true');
     navigation.reset({
       index: 0,
       routes: [{ name: 'PhoneLogin' }],

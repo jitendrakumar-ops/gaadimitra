@@ -7,6 +7,7 @@ import {
   ScrollView,
   StatusBar,
   Alert,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -15,61 +16,132 @@ import {
   VerifyOtpScreenRouteProp,
 } from '../../types/navigation';
 import { HeaderBar } from '../../components/common/HeaderBar';
-import { ShieldCheckBadgeIcon, AlertCircleIcon } from '../../assets/icons/Icons';
+import { ShieldCheckBadgeIcon, AlertCircleIcon, LockIcon } from '../../assets/icons/Icons';
 import { Button } from '../../components/common/Button';
 import { OtpInput } from '../../components/common/OtpInput';
+import { toast } from '../../components/common/ToastNotification';
 import { useTheme } from '../../theme';
+import { storageService } from '../../services/storage';
+import { notificationService } from '../../services/notificationService';
+import {
+  useAppDispatch,
+  useAppSelector,
+  verifyOtp,
+  sendOtp,
+  clearError,
+} from '../../store';
 
 export const VerifyOtpScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<VerifyOtpScreenNavigationProp>();
   const route = useRoute<VerifyOtpScreenRouteProp>();
+  const dispatch = useAppDispatch();
+  const { isLoading, error: reduxError, devOtp: storeDevOtp } = useAppSelector(
+    (state) => state.auth
+  );
+
   const rawPhone = route.params?.phoneNumber || '9876543210';
   const countryCode = route.params?.countryCode || '+91';
+  const initialDevOtp = (route.params?.devOtp || storeDevOtp) ?? undefined;
 
   // Format masked phone number: e.g. +91 98XXXXXX21
   const maskedPhone = `${countryCode} ${rawPhone.slice(0, 2)}XXXXXX${rawPhone.slice(-2)}`;
 
   const [otp, setOtp] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [timer, setTimer] = useState(30);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [timer, setTimer] = useState(60);
+  const [activeDevOtp, setActiveDevOtp] = useState<string | undefined>(initialDevOtp);
+
+  useEffect(() => {
+    dispatch(clearError());
+  }, [dispatch]);
 
   // Live countdown timer for OTP resend
   useEffect(() => {
     if (timer <= 0) return;
     const interval = setInterval(() => {
-      setTimer(prev => prev - 1);
+      setTimer((prev) => prev - 1);
     }, 1000);
 
     return () => clearInterval(interval);
   }, [timer]);
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     if (otp.length < 6) {
-      setError('Please enter all 6 digits of the verification code');
+      setLocalError('Please enter all 6 digits of the verification code');
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
+    setLocalError(null);
+    const fullPhone = `${countryCode}${rawPhone}`;
 
-    // Mock API verification
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      const deviceToken = await notificationService.getDeviceToken().catch(() => null);
+
+      await dispatch(
+        verifyOtp({
+          phone: fullPhone,
+          otp,
+          role: 'user',
+          platform: Platform.OS === 'ios' ? 'ios' : 'android',
+          deviceToken: deviceToken || undefined,
+        })
+      ).unwrap();
+
+      // Ensure /auth/device-token is synced
+      notificationService.syncDeviceToken().catch(() => {});
+
+      storageService.setString('has_completed_onboarding', 'true');
+
       navigation.navigate('LocationPermission', {
         phoneNumber: rawPhone,
       });
-    }, 500);
+    } catch (err: any) {
+      const message = typeof err === 'string' ? err : err?.message || 'Invalid or expired OTP. Please try again.';
+      setLocalError(message);
+    }
   };
 
-  const handleResend = () => {
-    if (timer > 0) return;
-    setTimer(30);
+  const handleResend = async () => {
+    if (timer > 0 || isLoading) return;
     setOtp('');
-    setError(null);
-    Alert.alert('OTP Sent', `A new 6-digit OTP has been sent to ${maskedPhone}`);
+    setLocalError(null);
+    dispatch(clearError());
+
+    const fullPhone = `${countryCode}${rawPhone}`;
+
+    try {
+      const result = await dispatch(
+        sendOtp({
+          phone: fullPhone,
+          role: 'user',
+        })
+      ).unwrap();
+
+      setTimer(result.cooldownSeconds || 60);
+      if (result.devOtp) {
+        setActiveDevOtp(result.devOtp);
+      }
+      toast.showSuccess(
+        `A new 6-digit OTP has been sent to ${maskedPhone}`,
+        'OTP Resent'
+      );
+    } catch (err: any) {
+
+      const message = typeof err === 'string' ? err : err?.message || 'Failed to resend OTP.';
+      setLocalError(message);
+      toast.showError(message, 'Failed to Resend OTP');
+    }
   };
+
+  const handleAutofillDevOtp = () => {
+    if (activeDevOtp) {
+      setOtp(activeDevOtp);
+      setLocalError(null);
+    }
+  };
+
+  const displayError = localError || reduxError;
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
@@ -115,19 +187,35 @@ export const VerifyOtpScreen: React.FC = () => {
             <OtpInput
               length={6}
               value={otp}
-              onChangeOtp={val => {
+              onChangeOtp={(val) => {
                 setOtp(val);
-                if (error) setError(null);
+                if (localError) setLocalError(null);
+                if (reduxError) dispatch(clearError());
               }}
               disabled={isLoading}
             />
 
+            {/* Dev Mode OTP Quick Autofill helper */}
+            {activeDevOtp ? (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={handleAutofillDevOtp}
+                style={{ backgroundColor: `${colors.primary}15`, borderColor: `${colors.primary}40` }}
+                className="flex-row items-center justify-center self-center px-3 py-1.5 rounded-full border mb-4"
+              >
+                <LockIcon size={14} color={colors.primary} />
+                <Text style={{ color: colors.primary }} className="text-xs font-bold ml-1.5">
+                  Dev OTP: {activeDevOtp} (Tap to autofill)
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
             {/* Error Message */}
-            {error && (
+            {displayError && (
               <View className="flex-row items-center justify-center -mt-2 mb-4">
                 <AlertCircleIcon size={14} color={colors.error} />
                 <Text style={{ color: colors.error }} className="text-xs ml-1.5 font-medium">
-                  {error}
+                  {displayError}
                 </Text>
               </View>
             )}
@@ -156,6 +244,7 @@ export const VerifyOtpScreen: React.FC = () => {
                   className="w-full"
                 />
               </View>
+
               {/* Resend Timer Notice */}
               <View className="items-center justify-center py-4">
                 {timer > 0 ? (

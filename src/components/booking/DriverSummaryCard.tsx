@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Image } from 'react-native';
 import { DriverInfo } from '../../types/navigation';
 import {
   DriverAvatarPortrait,
@@ -7,6 +7,8 @@ import {
   Car5SeaterGraphic,
 } from '../../assets/icons/Icons';
 import { useTheme } from '../../theme';
+import { useAppSelector } from '../../store';
+
 
 interface DriverSummaryCardProps {
   driver?: DriverInfo;
@@ -14,25 +16,16 @@ interface DriverSummaryCardProps {
 }
 
 export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
-  driver = {
-    id: 'drv_1',
-    name: 'Rahul Kumar',
-    phone: '+919876543210',
-    rating: '4.8',
-    totalRides: 286,
-    experienceYears: 5,
-    distance: '1.2 km away',
-    isVerified: true,
-    vehicleModel: 'Maruti Dzire',
-    vehicleType: 'Car',
-    vehiclePlate: 'BR01AB1234',
-    hasAc: true,
-    seatingCapacity: '4 Seats',
-    pricePerKm: '₹14 / km',
-  },
+  driver,
+
   className = '',
 }) => {
   const { colors } = useTheme();
+  const { user } = useAppSelector((state) => state.auth);
+
+  if (!driver) {
+    return null;
+  }
 
   return (
     <View
@@ -47,6 +40,7 @@ export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
         <View className="mr-3">
           <DriverAvatarPortrait
             size={52}
+            imageUrl={driver.profileImage || user?.profileImage}
             seed={driver.avatarSeed || '1'}
             bg={driver.avatarBg || '#EFF6FF'}
             showVerified={false}
@@ -55,11 +49,13 @@ export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
 
         <View className="flex-1">
           {/* Driver Name */}
+
+
           <Text
             style={{ color: colors.text }}
             className="text-base font-extrabold leading-tight"
           >
-            {driver.name}
+            {user?.name}
           </Text>
 
           {/* Vehicle Model */}
@@ -84,8 +80,28 @@ export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
 
       {/* Right side: Car Graphic + License Plate */}
       <View className="items-center justify-center">
-        <View className="w-24 h-12 items-center justify-center">
-          <Car5SeaterGraphic width={90} height={46} />
+        <View className="w-36 h-20 items-center justify-center">
+          {(() => {
+            const vehicleImg =
+              driver.vehicleImage ||
+              (Array.isArray(driver.driverVehicleImg)
+                ? driver.driverVehicleImg[0]
+                : driver.driverVehicleImg);
+
+            return vehicleImg ? (
+              <Image
+                source={{ uri: vehicleImg }}
+                className="w-full h-full rounded-lg"
+                resizeMode="contain"
+              />
+            ) : (
+              <Image
+                source={require('../../assets/images/maruti_dzire_white.jpg')}
+                className="w-full h-full"
+                resizeMode="contain"
+              />
+            );
+          })()}
         </View>
         <View
           style={{
@@ -98,7 +114,7 @@ export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
             style={{ color: colors.text }}
             className="text-[10px] font-mono font-bold uppercase tracking-wider"
           >
-            {driver.vehiclePlate || 'BR01AB1234'}
+            {driver.vehiclePlate || driver.vehicleNo || 'Not Registered'}
           </Text>
         </View>
       </View>

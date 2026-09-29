@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Alert,
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +16,7 @@ import {
   PhoneIcon,
 } from '../../assets/icons/Icons';
 import { useTheme } from '../../theme';
+import { confirmDialog } from '../../components/common/CustomAlertModal';
 
 interface ContactedDriverItem {
   id: string;
@@ -101,15 +101,16 @@ export const ContactedDriversScreen: React.FC = () => {
   const [contactedList] = useState<ContactedDriverItem[]>(SAMPLE_CONTACTED);
 
   const handleCall = (driver: DriverInfo) => {
-    Alert.alert('Call Driver', `Calling ${driver.name} (${driver.phone})...`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Call',
-        onPress: () => {
-          Linking.openURL(`tel:${driver.phone}`).catch(() => { });
-        },
+    confirmDialog.show({
+      title: 'Call Driver',
+      message: `Do you want to call ${driver.name} (${driver.phone})?`,
+      confirmText: 'Call Now',
+      cancelText: 'Cancel',
+      icon: 'phone',
+      onConfirm: () => {
+        Linking.openURL(`tel:${driver.phone}`).catch(() => {});
       },
-    ]);
+    });
   };
 
   const handleBookWithDriver = (driver: DriverInfo) => {
@@ -119,7 +120,11 @@ export const ContactedDriversScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      style={{ backgroundColor: colors.background }}
+      className="flex-1"
+    >
       <StatusBar
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}

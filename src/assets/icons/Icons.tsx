@@ -1,4 +1,5 @@
 import React from 'react';
+import { View, Image } from 'react-native';
 import Svg, {
   Path,
   Circle,
@@ -222,12 +223,83 @@ export const LocationMarkerIcon: React.FC<IconProps> = ({ size = 18, color = '#2
   </Svg>
 );
 
-export const DriverAvatarPortrait: React.FC<{ size?: number; seed?: string; bg?: string; showVerified?: boolean }> = ({
+export interface DriverAvatarPortraitProps {
+  size?: number;
+  seed?: string;
+  bg?: string;
+  showVerified?: boolean;
+  imageUrl?: string | null;
+  image?: string | null;
+  uri?: string | null;
+}
+
+export const DriverAvatarPortrait: React.FC<DriverAvatarPortraitProps> = ({
   size = 56,
   seed = '1',
   bg = '#EFF6FF',
   showVerified = true,
+  imageUrl,
+  image,
+  uri,
 }) => {
+  const [imageError, setImageError] = React.useState(false);
+  const resolvedUri = imageUrl || image || uri;
+
+  if (resolvedUri && !imageError) {
+    const badgeSize = Math.max(14, Math.round(size * 0.32));
+    const checkSize = Math.max(8, Math.round(size * 0.18));
+
+    return (
+      <View style={{ width: size, height: size, position: 'relative' }}>
+        <View
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            overflow: 'hidden',
+            backgroundColor: bg,
+            borderWidth: 1.5,
+            borderColor: '#DBEAFE',
+          }}
+        >
+          <Image
+            source={{ uri: resolvedUri }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+            onError={() => setImageError(true)}
+          />
+        </View>
+        {showVerified && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              right: 0,
+              width: badgeSize,
+              height: badgeSize,
+              borderRadius: badgeSize / 2,
+              backgroundColor: '#10B981',
+              borderWidth: 1.5,
+              borderColor: '#FFFFFF',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Svg width={checkSize} height={checkSize} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M20 6L9 17L4 12"
+                stroke="#FFFFFF"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          </View>
+        )}
+      </View>
+    );
+  }
+
   return (
     <Svg width={size} height={size} viewBox="0 0 64 64" fill="none">
       {/* Avatar Background Circle */}
@@ -501,6 +573,13 @@ export const CheckCircleIcon: React.FC<IconProps> = ({ size = 16, color = '#10B9
   </Svg>
 );
 
+export const XCircleIcon: React.FC<IconProps> = ({ size = 16, color = '#EF4444' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth="2" />
+    <Path d="M15 9L9 15M9 9L15 15" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
 export const AlertCircleIcon: React.FC<IconProps> = ({ size = 16, color = '#EF4444' }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth="2" />
@@ -617,10 +696,26 @@ export const CalendarOutlineIcon: React.FC<IconProps> = ({ size = 20, color = '#
   </Svg>
 );
 
-export const ClockOutlineIcon: React.FC<IconProps> = ({ size = 20, color = '#64748B' }) => (
+export const ClockOutlineIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 20,
+  color = '#64748B',
+  strokeWidth = 2,
+}) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth="1.8" />
-    <Path d="M12 6V12L16 14" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth={strokeWidth} />
+    <Path d="M12 6V12L16 14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const HourglassIcon: React.FC<IconProps> = ({ size = 20, color = '#64748B' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M5 22H19M5 2H19M17 2V6.5C17 8.5 15.5 10.5 13.5 11.5L12 12L10.5 11.5C8.5 10.5 7 8.5 7 6.5V2M17 22V17.5C17 15.5 15.5 13.5 13.5 12.5L12 12L10.5 12.5C8.5 13.5 7 15.5 7 17.5V22"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </Svg>
 );
 

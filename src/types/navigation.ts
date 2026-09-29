@@ -8,17 +8,21 @@ export interface DriverInfo {
   phone: string;
   avatarSeed?: string;
   avatarBg?: string;
+  profileImage?: string | null;
   rating: string;
   totalRides: number;
-  experienceYears: number;
+  experienceYears?: number;
   distance: string;
-  isVerified: boolean;
-  vehicleModel: string;
-  vehicleType: string;
-  vehiclePlate: string;
-  hasAc: boolean;
-  seatingCapacity: string;
-  pricePerKm: string;
+  isVerified?: boolean;
+  vehicleModel?: string;
+  vehicleType?: string;
+  vehiclePlate?: string;
+  vehicleNo?: string;
+  hasAc?: any;
+  seatingCapacity?: string | number;
+  pricePerKm?: string;
+  driverVehicleImg?: string[] | string;
+  vehicleImage?: string | null;
 }
 
 export interface TripInfoData {
@@ -26,7 +30,7 @@ export interface TripInfoData {
   destination: string;
   date: string;
   pickupTime: string;
-  passengers: string;
+  passengers: string | number;
   vehicleModel: string;
 }
 
@@ -37,13 +41,16 @@ export type RootStackParamList = {
   VerifyOtp: {
     phoneNumber: string;
     countryCode?: string;
+    devOtp?: string;
   };
   LocationPermission: {
     phoneNumber?: string;
   };
-  HomeDashboard: {
+  HomeDashboard?: {
     user?: User;
     selectedCity?: string;
+    screen?: string;
+    params?: any;
   };
   MyRides?: {
     initialFilter?: string;
@@ -53,6 +60,8 @@ export type RootStackParamList = {
   // Screen 07: Choose vehicle category
   ChooseVehicle: {
     selectedCity?: string;
+    serviceId?: string;
+    serviceTitle?: string;
     initialCategoryId?: string;
   };
   // Screen 08: Nearby drivers for selected vehicle category
@@ -60,10 +69,13 @@ export type RootStackParamList = {
     categoryId?: string;
     categoryTitle?: string;
     selectedCity?: string;
+    serviceId?: string;
+    vehicleId?: string;
   };
   // Screen 09: Driver profile & contact
   DriverProfile: {
-    driver: DriverInfo;
+    driver?: DriverInfo;
+    driverId?: string;
     selectedCity?: string;
   };
 
@@ -81,6 +93,9 @@ export type RootStackParamList = {
     agreedFare?: number;
     tripInfo?: TripInfoData;
     selectedCity?: string;
+    bookingId?: string;
+    pickupCoords?: { latitude: number; longitude: number };
+    dropCoords?: { latitude: number; longitude: number };
   };
 
   // Screen 17: Driver accepted
@@ -89,6 +104,10 @@ export type RootStackParamList = {
     agreedFare?: number;
     tripInfo?: TripInfoData;
     bookingToken?: number;
+    bookingId?: string;
+    name?: string;
+    phone?: string;
+    status?: string;
   };
 
   // Screen 18: Ride confirmed

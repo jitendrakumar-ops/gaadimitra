@@ -153,8 +153,17 @@ export const DEFAULT_SAMPLE_RIDES: BookedRide[] = [
   },
 ];
 
-// In-memory rides state
-let inMemoryRides: BookedRide[] = [...DEFAULT_SAMPLE_RIDES];
+// In-memory rides state loaded from storage (no hardcoded/dummy default rides)
+let inMemoryRides: BookedRide[] = storageService.getObject<BookedRide[]>(RIDES_STORAGE_KEY) || [];
+
+const listeners = new Set<() => void>();
+const notifyRideListeners = () => {
+  listeners.forEach(fn => {
+    try {
+      fn();
+    } catch {}
+  });
+};
 
 export const ridesService = {
   /**
@@ -162,6 +171,23 @@ export const ridesService = {
    */
   getAllRides: (): BookedRide[] => {
     return [...inMemoryRides];
+  },
+
+  /**
+   * Get current active/pending ride (neither completed nor cancelled)
+   */
+  getActiveRide: (): BookedRide | undefined => {
+    return inMemoryRides.find(r => r.status !== 'completed' && r.status !== 'cancelled');
+  },
+
+  /**
+   * Subscribe to ride changes
+   */
+  subscribe: (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
   },
 
   /**
@@ -173,18 +199,21 @@ export const ridesService = {
   },
 
   /**
-   * Save a newly confirmed ride
+   * Save a newly confirmed or pending ride
    */
   saveRide: (newRide: Omit<BookedRide, 'id' | 'createdAt' | 'updatedAt'>): BookedRide => {
+    const existing = inMemoryRides.find(r => r.bookingId === newRide.bookingId);
     const ride: BookedRide = {
       ...newRide,
-      id: `ride_${Date.now()}`,
-      createdAt: new Date().toISOString(),
+      id: existing?.id || `ride_${Date.now()}`,
+      createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     // Prepend to top of list
     inMemoryRides = [ride, ...inMemoryRides.filter(r => r.bookingId !== ride.bookingId)];
+    storageService.setObject(RIDES_STORAGE_KEY, inMemoryRides);
+    notifyRideListeners();
     return ride;
   },
 
@@ -202,6 +231,8 @@ export const ridesService = {
       }
       return ride;
     });
+    storageService.setObject(RIDES_STORAGE_KEY, inMemoryRides);
+    notifyRideListeners();
   },
 
   /**

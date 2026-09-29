@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -28,30 +27,40 @@ import {
 } from '../../assets/icons/Icons';
 import { storageService } from '../../services/storage';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector, logout } from '../../store';
+import { confirmDialog } from '../../components/common/CustomAlertModal';
 
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { themeMode, colors, isDark } = useTheme();
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector((state) => state.auth);
 
   const handleLogout = () => {
-    Alert.alert('Log Out', 'Are you sure you want to log out of GaadiMitra?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log Out',
-        style: 'destructive',
-        onPress: () => {
-          storageService.clearAll();
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'PhoneLogin' }],
-          });
-        },
+    confirmDialog.show({
+      title: 'Log Out',
+      message: 'Are you sure you want to log out of GaadiMitra?',
+      confirmText: 'Log Out',
+      cancelText: 'Cancel',
+      isDestructive: true,
+      icon: 'logout',
+      onConfirm: () => {
+        dispatch(logout());
+        storageService.clearAll();
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'PhoneLogin' }],
+        });
       },
-    ]);
+    });
   };
 
   return (
-    <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      style={{ backgroundColor: colors.background }}
+      className="flex-1"
+    >
       <StatusBar
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}
@@ -102,30 +111,41 @@ export const ProfileScreen: React.FC = () => {
           className="p-4 rounded-xl border mb-5 flex-row items-center"
         >
           {/* Avatar with Camera Icon Overlay */}
-          <View className="relative mr-4">
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('PersonalDetails')}
+            className="relative mr-4"
+          >
             <View
               style={{
                 borderColor: colors.border,
                 backgroundColor: colors.surface,
               }}
-              className="w-16 h-16 rounded-full overflow-hidden border"
+              className="w-16 h-16 rounded-full overflow-hidden border items-center justify-center"
             >
-              <Image
-                source={require('../../assets/images/driver_rahul.jpg')}
-                className="w-full h-full"
-                resizeMode="cover"
-              />
+              {user?.profileImage ? (
+                <Image
+                  source={{ uri: user.profileImage }}
+                  className="w-full h-full"
+                  resizeMode="cover"
+                />
+              ) : (
+                <Image
+                  source={require('../../assets/images/driver_rahul.jpg')}
+                  className="w-full h-full"
+                  resizeMode="cover"
+                />
+              )}
             </View>
 
             {/* Camera badge overlay */}
-            <TouchableOpacity
-              activeOpacity={0.8}
+            <View
               style={{ backgroundColor: colors.primary }}
               className="absolute bottom-0 right-0 w-6 h-6 rounded-full items-center justify-center border-2 border-white shadow-sm"
             >
               <CameraBadgeIcon size={11} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+            </View>
+          </TouchableOpacity>
 
           {/* User Details */}
           <View className="flex-1">
@@ -133,72 +153,14 @@ export const ProfileScreen: React.FC = () => {
               style={{ color: colors.text }}
               className="text-lg font-bold leading-tight"
             >
-              Rahul Sharma
+              {user?.name || 'GaadiMitra User'}
             </Text>
             <Text
               style={{ color: colors.textSecondary }}
               className="text-xs font-semibold mt-0.5 tracking-wider"
             >
-              +91 XXXXX XXXXX
+              {user?.phone || user?.phoneNumber || '+91 XXXXX XXXXX'}
             </Text>
-          </View>
-        </View>
-
-        {/* Section: PREFERENCES & SETTINGS */}
-        <View className="mb-4">
-          <Text
-            style={{ color: colors.textSecondary }}
-            className="text-[11px] font-bold uppercase tracking-wider mb-2 px-1"
-          >
-            PREFERENCES
-          </Text>
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            }}
-            className="rounded-xl border overflow-hidden"
-          >
-            {/* App Settings & Theme */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => navigation.navigate('Settings')}
-              className="p-3.5 flex-row items-center justify-between"
-            >
-              <View className="flex-row items-center flex-1">
-                <View className="w-8 items-center">
-                  <SettingsGearIcon size={19} color={colors.primary} />
-                </View>
-                <View className="ml-2 flex-1">
-                  <Text
-                    style={{ color: colors.text }}
-                    className="text-sm font-bold"
-                  >
-                    Settings & Theme
-                  </Text>
-                  <Text
-                    style={{ color: colors.textSecondary }}
-                    className="text-xs mt-0.5"
-                  >
-                    Theme mode, notifications & app settings
-                  </Text>
-                </View>
-              </View>
-              <View className="flex-row items-center">
-                <View
-                  style={{ backgroundColor: `${colors.primary}20` }}
-                  className="px-2.5 py-1 rounded-full mr-2"
-                >
-                  <Text
-                    style={{ color: colors.primary }}
-                    className="text-[11px] font-bold capitalize"
-                  >
-                    {themeMode}
-                  </Text>
-                </View>
-                <ChevronRightIcon size={16} color={colors.disabled} />
-              </View>
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -335,6 +297,64 @@ export const ProfileScreen: React.FC = () => {
                 </Text>
               </View>
               <ChevronRightIcon size={16} color={colors.disabled} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Section: PREFERENCES & SETTINGS */}
+        <View className="mb-4">
+          <Text
+            style={{ color: colors.textSecondary }}
+            className="text-[11px] font-bold uppercase tracking-wider mb-2 px-1"
+          >
+            PREFERENCES
+          </Text>
+          <View
+            style={{
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            }}
+            className="rounded-xl border overflow-hidden"
+          >
+            {/* App Settings & Theme */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('Settings')}
+              className="p-3.5 flex-row items-center justify-between"
+            >
+              <View className="flex-row items-center flex-1">
+                <View className="w-8 items-center">
+                  <SettingsGearIcon size={19} color={colors.primary} />
+                </View>
+                <View className="ml-2 flex-1">
+                  <Text
+                    style={{ color: colors.text }}
+                    className="text-sm font-bold"
+                  >
+                    Settings & Theme
+                  </Text>
+                  <Text
+                    style={{ color: colors.textSecondary }}
+                    className="text-xs mt-0.5"
+                  >
+                    Theme mode, notifications & app settings
+                  </Text>
+                </View>
+              </View>
+              <View className="flex-row items-center">
+                <View
+                  style={{ backgroundColor: `${colors.primary}20` }}
+                  className="px-2.5 py-1 rounded-full mr-2"
+                >
+                  <Text
+                    style={{ color: colors.primary }}
+                    className="text-[11px] font-bold capitalize"
+                  >
+                    {themeMode}
+                  </Text>
+                </View>
+                <ChevronRightIcon size={16} color={colors.disabled} />
+              </View>
             </TouchableOpacity>
           </View>
         </View>

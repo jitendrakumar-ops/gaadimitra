@@ -102,7 +102,7 @@ export const ActionDropdownMenu: React.FC<ActionDropdownMenuProps> = ({
       >
         {/* Floating Popover Container */}
         <Animated.View
-          className="absolute w-[270px] bg-white rounded-2xl border border-slate-200 py-2 px-1.5 shadow-2xl"
+          className="absolute w-[270px] bg-white rounded-xl border border-slate-200 py-2 px-1.5 shadow-2xl"
           style={{
             top: anchorTop,
             right: anchorRight,

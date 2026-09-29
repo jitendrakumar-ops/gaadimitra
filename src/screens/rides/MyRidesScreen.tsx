@@ -17,7 +17,11 @@ export const MyRidesScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
 
   return (
-    <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      style={{ backgroundColor: colors.background }}
+      className="flex-1"
+    >
       <StatusBar
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal,
-  Alert,
   Linking,
   Image,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -20,172 +20,189 @@ import {
 } from '../../types/navigation';
 import { HeaderBar } from '../../components/common/HeaderBar';
 import {
-  FilterIcon,
   ChevronDownIcon,
   StarIcon,
   PhoneIcon,
   DriverAvatarPortrait,
   LocationMarkerIcon,
   CheckCircleIcon,
+  XCircleIcon,
   CarBadgeIcon,
 } from '../../assets/icons/Icons';
 import {
   getCityCoordinates,
-  buildGoogleStaticMapUrl,
+  geocodeAddress,
+  GOOGLE_MAPS_API_KEY,
+  Coordinates,
 } from '../../utils/mapConfig';
 import { useTheme } from '../../theme';
+import { useAppDispatch, useAppSelector, fetchNearbyDrivers } from '../../store';
+import { storageService } from '../../services/storage';
+import { toast } from '../../components/common/ToastNotification';
+import { confirmDialog } from '../../components/common/CustomAlertModal';
 
 export const NearbyDriversScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<NearbyDriversScreenNavigationProp>();
   const route = useRoute<NearbyDriversScreenRouteProp>();
-  const categoryTitle = route.params?.categoryTitle || 'Cars';
-  const selectedCity = route.params?.selectedCity || 'Patna Junction, Patna';
+  const dispatch = useAppDispatch();
+
+  const categoryTitle = route.params?.categoryTitle || 'Drivers';
+  const selectedCity =
+    route.params?.selectedCity ||
+    storageService.getString('user_selected_city') ||
+    'Current Location';
+  const serviceId = route.params?.serviceId;
+  const vehicleId = route.params?.vehicleId;
+
+  // Redux: nearby drivers state from POST /drivers/nearby
+  const { nearbyDrivers, isLoading, error } = useAppSelector((state) => state.drivers);
 
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
-  const [selectedRadius, setSelectedRadius] = useState<number>(5);
+  const [selectedRadius, setSelectedRadius] = useState<number>(10);
   const [showRadiusModal, setShowRadiusModal] = useState<boolean>(false);
   const [selectedDriverIndex, setSelectedDriverIndex] = useState<number>(0);
-  const [isMapImageLoading, setIsMapImageLoading] = useState<boolean>(true);
+
 
   const radiusOptions = [
     { label: 'Within 2 km', value: 2 },
     { label: 'Within 5 km', value: 5 },
     { label: 'Within 10 km', value: 10 },
     { label: 'Within 25 km', value: 25 },
+    { label: 'Within 50 km', value: 50 },
   ];
 
-  // Base coordinates for selected location
-  const centerCoords = useMemo(
-    () => getCityCoordinates(selectedCity),
-    [selectedCity]
+  // Base coordinates for selected location (dynamically resolved via Google Geocoding API)
+  const [centerCoords, setCenterCoords] = useState<Coordinates>(() =>
+    getCityCoordinates(selectedCity)
   );
 
-  const driversList: (DriverInfo & { lat: number; lng: number })[] = useMemo(() => [
-    {
-      id: 'drv_1',
-      name: 'Rahul Kumar',
-      phone: '+919876543210',
-      avatarSeed: '1',
-      avatarBg: '#EFF6FF',
-      rating: '4.8',
-      totalRides: 286,
-      experienceYears: 5,
-      distance: '1.2 km away',
-      isVerified: true,
-      vehicleModel: 'Maruti Dzire',
-      vehicleType: categoryTitle,
-      vehiclePlate: 'BR01AB1234',
-      hasAc: true,
-      seatingCapacity: '4 Seats',
-      pricePerKm: '₹14 / km',
-      lat: centerCoords.latitude + 0.007,
-      lng: centerCoords.longitude + 0.008,
-    },
-    {
-      id: 'drv_2',
-      name: 'Amit Kumar',
-      phone: '+919812345678',
-      avatarSeed: '2',
-      avatarBg: '#F1F5F9',
-      rating: '4.6',
-      totalRides: 194,
-      experienceYears: 3,
-      distance: '2.4 km away',
-      isVerified: true,
-      vehicleModel: 'WagonR',
-      vehicleType: categoryTitle,
-      vehiclePlate: 'BR01CD5678',
-      hasAc: true,
-      seatingCapacity: '4 Seats',
-      pricePerKm: '₹12 / km',
-      lat: centerCoords.latitude - 0.009,
-      lng: centerCoords.longitude + 0.012,
-    },
-    {
-      id: 'drv_3',
-      name: 'Rakesh Kumar',
-      phone: '+919834567890',
-      avatarSeed: '3',
-      avatarBg: '#ECFDF5',
-      rating: '4.9',
-      totalRides: 412,
-      experienceYears: 7,
-      distance: '3.1 km away',
-      isVerified: true,
-      vehicleModel: 'Ertiga',
-      vehicleType: categoryTitle,
-      vehiclePlate: 'BR01EF9012',
-      hasAc: true,
-      seatingCapacity: '6 Seats',
-      pricePerKm: '₹16 / km',
-      lat: centerCoords.latitude + 0.012,
-      lng: centerCoords.longitude - 0.011,
-    },
-    {
-      id: 'drv_4',
-      name: 'Santosh Yadav',
-      phone: '+919871122334',
-      avatarSeed: '4',
-      avatarBg: '#FEF3C7',
-      rating: '4.7',
-      totalRides: 156,
-      experienceYears: 4,
-      distance: '4.5 km away',
-      isVerified: true,
-      vehicleModel: 'Scorpio Classic',
-      vehicleType: categoryTitle,
-      vehiclePlate: 'BR01GH3456',
-      hasAc: true,
-      seatingCapacity: '7 Seats',
-      pricePerKm: '₹18 / km',
-      lat: centerCoords.latitude - 0.014,
-      lng: centerCoords.longitude - 0.009,
-    },
-  ], [categoryTitle, centerCoords]);
+  useEffect(() => {
+    let isMounted = true;
+    if (selectedCity && selectedCity !== 'Detecting location...') {
+      geocodeAddress(selectedCity).then((coords) => {
+        if (isMounted && coords) {
+          setCenterCoords(coords);
+        }
+      });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCity]);
 
-  // Google Static Map URL using MAP_KEY
-  const mapUrl = useMemo(() => {
-    const zoomLevel = selectedRadius <= 2 ? 15 : selectedRadius <= 5 ? 14 : selectedRadius <= 10 ? 13 : 12;
-    return buildGoogleStaticMapUrl(
-      centerCoords,
-      driversList.map((d, i) => ({
-        latitude: d.lat,
-        longitude: d.lng,
-        label: `${i + 1}`,
-      })),
-      zoomLevel,
-      600,
-      400
+  // Haversine formula to compute distance in km
+  const computeDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  // Dispatch fetchNearbyDrivers API call with (serviceId, vehicleId, pickuplocation, distance)
+  const loadNearbyDrivers = useCallback(() => {
+    dispatch(
+      fetchNearbyDrivers({
+        serviceId: serviceId || undefined,
+        vehicleId: vehicleId || undefined,
+        pickuplocation: {
+          latitude: centerCoords.latitude,
+          longitude: centerCoords.longitude,
+          address: selectedCity,
+        },
+        distance: selectedRadius,
+      })
     );
-  }, [centerCoords, driversList, selectedRadius]);
+  }, [dispatch, serviceId, vehicleId, centerCoords, selectedCity, selectedRadius]);
+
+  useEffect(() => {
+    loadNearbyDrivers();
+  }, [loadNearbyDrivers]);
+
+  // Map live API driver items into display format (no fake fallback data)
+  const driversList: (DriverInfo & { lat: number; lng: number })[] = useMemo(() => {
+    if (!nearbyDrivers || nearbyDrivers.length === 0) {
+      return [];
+    }
+
+    return nearbyDrivers.map((driver, idx) => {
+      // Geo coordinates [longitude, latitude] in GeoJSON Point format
+      const lat = driver.currentLocation?.coordinates?.[1] ?? centerCoords.latitude;
+      const lng = driver.currentLocation?.coordinates?.[0] ?? centerCoords.longitude;
+
+      const dist = computeDistanceKm(centerCoords.latitude, centerCoords.longitude, lat, lng);
+      const distanceStr = dist < 0.1 ? 'Nearby (50m)' : `${dist.toFixed(1)} km away`;
+
+
+      const avatarBgList = ['#EFF6FF', '#F1F5F9', '#ECFDF5', '#FEF3C7'];
+
+      return {
+        id: driver._id || driver.id || `drv_${idx}`,
+        name: driver.userId?.name || `Driver Partner #${idx + 1}`,
+        phone: driver.userId?.phone || '',
+        avatarSeed: String(idx + 1),
+        profileImage: driver.userId?.profileImage,
+        avatarBg: avatarBgList[idx % avatarBgList.length],
+        rating: (driver.rating || 4.8).toFixed(1),
+        totalRides: driver.totalTripsCount || 0,
+        experienceYears: driver.experienceYears ?? driver.userId?.experienceYears ?? 3,
+        distance: distanceStr,
+        isVerified: driver.isVerified ?? true,
+        vehicleModel: driver.vehicleModel,
+        vehiclePlate: driver.vehicleNo || 'BR01--XXXX',
+        hasAc: driver.type,
+        seatingCapacity: driver.seating ? `${driver.seating} Seats` : "",
+        driverVehicleImg: driver.vehicleImages,
+        lat,
+        lng,
+      };
+    });
+  }, [nearbyDrivers, centerCoords, categoryTitle]);
+
+  // Keep selectedDriverIndex in bounds
+  useEffect(() => {
+    if (selectedDriverIndex >= driversList.length) {
+      setSelectedDriverIndex(0);
+    }
+  }, [driversList.length, selectedDriverIndex]);
+
+
 
   const handleCallDriver = (driver: DriverInfo) => {
-    Alert.alert(
-      `Call ${driver.name}`,
-      `Do you want to place a direct phone call to ${driver.name} (${driver.phone})?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call Now',
-          onPress: () => {
-            Linking.openURL(`tel:${driver.phone}`).catch(() => {
-              Alert.alert('Phone Dialer', `Direct number: ${driver.phone}`);
-            });
-          },
-        },
-      ]
-    );
+    if (!driver.phone) {
+      toast.showError('This driver does not have a public phone number.', 'No Phone Number');
+      return;
+    }
+
+    confirmDialog.show({
+      title: `Call ${driver.name}`,
+      message: `Do you want to place a direct phone call to ${driver.name} (${driver.phone})?`,
+      confirmText: 'Call Now',
+      cancelText: 'Cancel',
+      icon: 'phone',
+      onConfirm: () => {
+        Linking.openURL(`tel:${driver.phone}`).catch(() => {
+          toast.showInfo(`Direct number: ${driver.phone}`, 'Phone Dialer');
+        });
+      },
+    });
   };
 
   const handleOpenProfile = (driver: DriverInfo) => {
     navigation.navigate('DriverProfile', {
       driver,
+      driverId: driver.id,
       selectedCity,
     });
   };
 
-  const selectedDriver = driversList[selectedDriverIndex] || driversList[0];
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1">
@@ -215,14 +232,127 @@ export const NearbyDriversScreen: React.FC = () => {
         }
       />
 
-      {/* Main Content: List Mode */}
-      {viewMode === 'list' ? (
-        <ScrollView
-          contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-          showsVerticalScrollIndicator={false}
-          className="flex-1"
+      {/* Location & View Mode Switcher */}
+      <View
+        style={{ backgroundColor: colors.card, borderBottomColor: colors.border }}
+        className="flex-row items-center justify-between px-4 py-2.5 border-b"
+      >
+        <View className="flex-row items-center flex-1 pr-2">
+          <LocationMarkerIcon size={14} color={colors.primary} />
+          <Text
+            numberOfLines={1}
+            style={{ color: colors.textSecondary }}
+            className="text-xs font-semibold ml-1.5"
+          >
+            {selectedCity}
+          </Text>
+        </View>
+
+        {/* List / Map Toggle Tabs */}
+        <View
+          style={{ backgroundColor: colors.surface, borderColor: colors.border }}
+          className="flex-row p-0.5 rounded-lg border"
         >
-          {driversList.map(driver => (
+          <TouchableOpacity
+            onPress={() => setViewMode('list')}
+            style={{
+              backgroundColor: viewMode === 'list' ? colors.primary : 'transparent',
+            }}
+            className="px-3 py-1 rounded-md"
+          >
+            <Text
+              style={{
+                color: viewMode === 'list' ? '#FFFFFF' : colors.textSecondary,
+              }}
+              className="text-xs font-bold"
+            >
+              List
+            </Text>
+          </TouchableOpacity>
+
+        </View>
+      </View>
+
+      {/* Main Content Area */}
+
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingBottom: 32, flexGrow: 1 }}
+        showsVerticalScrollIndicator={false}
+        className="flex-1"
+        refreshControl={
+          <RefreshControl
+            refreshing={isLoading && driversList.length > 0}
+            onRefresh={loadNearbyDrivers}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
+      >
+        {/* Single Clean Loading State */}
+        {isLoading && driversList.length === 0 ? (
+          <View className="flex-1 items-center justify-center py-24">
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={{ color: colors.textSecondary }} className="text-sm font-semibold mt-3">
+              Finding nearby drivers...
+            </Text>
+            <Text style={{ color: colors.placeholder }} className="text-xs mt-1">
+              Searching within {selectedRadius} km
+            </Text>
+          </View>
+        ) : error && driversList.length === 0 ? (
+          /* Error State */
+          <View className="flex-1 items-center justify-center py-20 px-6">
+            <Text style={{ color: colors.text }} className="text-base font-bold text-center">
+              Unable to find drivers
+            </Text>
+            <Text style={{ color: colors.textSecondary }} className="text-xs text-center mt-1.5 mb-4">
+              {error}
+            </Text>
+            <TouchableOpacity
+              onPress={loadNearbyDrivers}
+              style={{ backgroundColor: colors.primary }}
+              className="px-5 py-2.5 rounded-xl"
+            >
+              <Text className="text-white text-xs font-bold">Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : driversList.length === 0 ? (
+          /* Empty State */
+          <View className="flex-1 items-center justify-center py-20 px-6">
+            <View
+              style={{ backgroundColor: `${colors.primary}15` }}
+              className="w-16 h-16 rounded-full items-center justify-center mb-3"
+            >
+              <LocationMarkerIcon size={30} color={colors.primary} />
+            </View>
+            <Text style={{ color: colors.text }} className="text-base font-bold text-center">
+              No Drivers Found Nearby
+            </Text>
+            <Text style={{ color: colors.textSecondary }} className="text-xs text-center mt-1.5 mb-5 max-w-[280px]">
+              No online drivers found within {selectedRadius} km for {categoryTitle}. Try expanding your search radius.
+            </Text>
+            <View className="flex-row items-center">
+              {selectedRadius < 25 && (
+                <TouchableOpacity
+                  onPress={() => setSelectedRadius(25)}
+                  style={{ backgroundColor: colors.primary }}
+                  className="px-4 py-2.5 rounded-xl mr-2"
+                >
+                  <Text className="text-white text-xs font-bold">Search 25 km</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={loadNearbyDrivers}
+                style={{ borderColor: colors.border, backgroundColor: colors.card }}
+                className="px-4 py-2.5 rounded-xl border"
+              >
+                <Text style={{ color: colors.text }} className="text-xs font-bold">Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          /* Live Drivers List */
+          driversList.map(driver => (
             <TouchableOpacity
               key={driver.id}
               activeOpacity={0.85}
@@ -231,13 +361,14 @@ export const NearbyDriversScreen: React.FC = () => {
                 backgroundColor: colors.card,
                 borderColor: colors.border,
               }}
-              className="rounded-xl p-4 mb-3 border"
+              className="rounded-xl p-4 mb-3 border shadow-sm"
             >
               {/* Top Row: Avatar, Name, Rating, Specs */}
               <View className="flex-row items-center justify-between mb-3">
                 <View className="flex-row items-center flex-1">
                   <DriverAvatarPortrait
                     size={48}
+                    imageUrl={driver.profileImage}
                     seed={driver.avatarSeed}
                     bg={driver.avatarBg}
                     showVerified={false}
@@ -260,7 +391,7 @@ export const NearbyDriversScreen: React.FC = () => {
                       style={{ color: colors.placeholder }}
                       className="text-[11px] font-semibold mt-0.5"
                     >
-                      {driver.hasAc ? 'AC • ' : ''}
+                      {driver.hasAc} {" "}
                       {driver.seatingCapacity}
                     </Text>
                   </View>
@@ -288,10 +419,10 @@ export const NearbyDriversScreen: React.FC = () => {
                     </Text>
                   </View>
 
-                  <View className="flex-row items-center px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200">
-                    <CheckCircleIcon size={12} color="#10B981" />
-                    <Text className="text-[10px] font-bold text-emerald-700 ml-1">
-                      Verified
+                  <View className={`flex-row items-center px-2 py-0.5 rounded-full ${driver.isVerified ? "bg-emerald-50 border border-emerald-200" : "bg-red-50 border border-red-200"}`}>
+                    {driver.isVerified ? <CheckCircleIcon size={12} color="#10B981" /> : <XCircleIcon size={12} color="#ef4444" />}
+                    <Text className={`text-[10px] font-bold ml-1 ${driver.isVerified ? "text-emerald-700" : "text-red-700"}`}>
+                      {driver.isVerified ? "Verified" : "Not Verified"}
                     </Text>
                   </View>
                 </View>
@@ -313,157 +444,10 @@ export const NearbyDriversScreen: React.FC = () => {
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      ) : (
-        /* Live Satellite/Street Maps Mode */
-        <View className="flex-1">
-          {/* Map Container View */}
-          <View className="flex-1 relative bg-slate-200 overflow-hidden">
-            {/* Live Map Image */}
-            <Image
-              source={{ uri: mapUrl }}
-              onLoadStart={() => setIsMapImageLoading(true)}
-              onLoadEnd={() => setIsMapImageLoading(false)}
-              onError={() => setIsMapImageLoading(false)}
-              resizeMode="cover"
-              className="w-full h-full"
-            />
+          ))
+        )}
+      </ScrollView>
 
-            {/* Map Loading Overlay */}
-            {isMapImageLoading && (
-              <View className="absolute inset-0 bg-white/85 items-center justify-center">
-                <ActivityIndicator size="large" color="#2563EB" />
-                <Text className="text-xs font-bold text-slate-600 mt-2">
-                  Loading Live Map...
-                </Text>
-              </View>
-            )}
-
-            {/* Center User Location Marker Overlay */}
-            <View className="absolute top-3.5 left-3.5 bg-white px-3 py-1.5 rounded-xl border border-slate-300 flex-row items-center shadow-sm">
-              <View className="w-2 h-2 rounded-full bg-blue-600 mr-1.5" />
-              <Text className="text-xs font-bold text-slate-800">
-                {selectedCity} (Center)
-              </Text>
-            </View>
-
-            {/* Live Driver Interactive Overlay Pins */}
-            {driversList.map((driver, idx) => {
-              const pinPositions = [
-                { top: '28%', left: '22%' },
-                { top: '38%', right: '18%' },
-                { bottom: '34%', left: '26%' },
-                { bottom: '26%', right: '22%' },
-              ][idx % 4];
-
-              const isCurrent = selectedDriverIndex === idx;
-
-              return (
-                <TouchableOpacity
-                  key={driver.id}
-                  activeOpacity={0.8}
-                  onPress={() => setSelectedDriverIndex(idx)}
-                  style={pinPositions as any}
-                  className={`absolute px-2.5 py-1.5 rounded-xl border flex-row items-center ${
-                    isCurrent
-                      ? 'bg-blue-600 border-white shadow-md'
-                      : 'bg-white border-blue-600 shadow-sm'
-                  }`}
-                >
-                  <CarBadgeIcon
-                    size={14}
-                    color={isCurrent ? '#FFFFFF' : '#2563EB'}
-                  />
-                  <Text
-                    className={`text-[11px] font-bold ml-1 ${
-                      isCurrent ? 'text-white' : 'text-slate-900'
-                    }`}
-                  >
-                    #{idx + 1} {driver.name.split(' ')[0]}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {/* Bottom Floating Active Driver Card on Map */}
-          <View
-            style={{
-              backgroundColor: colors.card,
-              borderTopColor: colors.border,
-            }}
-            className="p-4 border-t"
-          >
-            <View className="flex-row items-center justify-between mb-3.5">
-              <View className="flex-row items-center flex-1">
-                <DriverAvatarPortrait
-                  size={46}
-                  seed={selectedDriver.avatarSeed}
-                  bg={selectedDriver.avatarBg}
-                />
-                <View className="ml-3 flex-1">
-                  <Text
-                    style={{ color: colors.text }}
-                    className="text-base font-extrabold"
-                  >
-                    {selectedDriver.name}
-                  </Text>
-                  <Text
-                    style={{ color: colors.textSecondary }}
-                    className="text-xs font-bold mt-0.5"
-                  >
-                    {selectedDriver.vehicleModel}
-                  </Text>
-                </View>
-              </View>
-
-              <View className="items-end">
-                <Text
-                  style={{ color: colors.primary }}
-                  className="text-base font-black"
-                >
-                  {selectedDriver.pricePerKm}
-                </Text>
-                <Text
-                  style={{ color: colors.placeholder }}
-                  className="text-[11px] font-semibold"
-                >
-                  {selectedDriver.distance}
-                </Text>
-              </View>
-            </View>
-
-            <View className="flex-row items-center">
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => handleOpenProfile(selectedDriver)}
-                style={{
-                  borderColor: colors.border,
-                  backgroundColor: colors.surface,
-                }}
-                className="flex-1 py-3 rounded-xl border items-center justify-center mr-2"
-              >
-                <Text style={{ color: colors.text }} className="text-xs font-bold">
-                  View Profile
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => handleCallDriver(selectedDriver)}
-                style={{ backgroundColor: colors.primary }}
-                className="flex-1 py-3 rounded-xl items-center justify-center flex-row ml-2"
-              >
-                <PhoneIcon size={14} color="#FFFFFF" />
-                <Text className="text-xs font-extrabold text-white ml-1.5">
-                  Call Driver
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      )}
 
       {/* Radius Filter Modal */}
       <Modal
@@ -513,9 +497,8 @@ export const NearbyDriversScreen: React.FC = () => {
                       style={{
                         color: isSelected ? colors.primary : colors.text,
                       }}
-                      className={`text-sm ${
-                        isSelected ? 'font-bold' : 'font-semibold'
-                      }`}
+                      className={`text-sm ${isSelected ? 'font-bold' : 'font-semibold'
+                        }`}
                     >
                       {opt.label}
                     </Text>

@@ -1,6 +1,12 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { PermissionsAndroid, Platform, NativeModules } from 'react-native';
+import Geolocation, { GeoPosition } from 'react-native-geolocation-service';
+import { storageService } from '../services/storage';
 
-export const GOOGLE_MAPS_API_KEY = 'AIzaSyBeGZHlLJ9zoKsrB_W60MmYlumItxaZrmI';
+declare const process: any;
+
+export const GOOGLE_MAPS_API_KEY =
+  (typeof process !== 'undefined' && (process.env?.MAP_KEY || process.env?.GOOGLE_MAPS_API_KEY)) ||
+  'AIzaSyBeGZHlLJ9zoKsrB_W60MmYlumItxaZrmI';
 
 export interface Coordinates {
   latitude: number;
@@ -16,187 +22,203 @@ export interface GeocodedAddress {
   coordinates: Coordinates;
 }
 
-export const CITY_COORDINATES: Record<string, Coordinates> = {
-  'Patna Junction, Patna': { latitude: 25.6022, longitude: 85.1376 },
-  'Bailey Road, Patna': { latitude: 25.6121, longitude: 85.1054 },
-  'Kankarbagh, Patna': { latitude: 25.5921, longitude: 85.1584 },
-  'Boring Road, Patna': { latitude: 25.6174, longitude: 85.1189 },
-  'Patna Airport (PAT)': { latitude: 25.5913, longitude: 85.0880 },
-  'Gaya Junction, Gaya': { latitude: 24.8055, longitude: 85.0068 },
-  'Muzaffarpur City': { latitude: 26.1209, longitude: 85.3647 },
-  'Bhagalpur Station': { latitude: 25.2425, longitude: 86.9842 },
-  'Darbhanga Airport': { latitude: 26.1971, longitude: 85.9184 },
-  'Connaught Place, New Delhi': { latitude: 28.6315, longitude: 77.2167 },
-  'IGI Airport T3, New Delhi': { latitude: 28.5562, longitude: 77.1000 },
-  'Sector 18, Noida': { latitude: 28.5708, longitude: 77.3260 },
-  'Hazratganj, Lucknow': { latitude: 26.8500, longitude: 80.9500 },
-  'Charbagh Station, Lucknow': { latitude: 26.8300, longitude: 80.9200 },
-  'Varanasi Cantt, Varanasi': { latitude: 25.3267, longitude: 82.9867 },
-  'Ranchi Main Road': { latitude: 23.3441, longitude: 85.3096 },
-  'Koramangala, Bengaluru': { latitude: 12.9352, longitude: 77.6245 },
-  'Andheri East, Mumbai': { latitude: 19.1136, longitude: 72.8697 },
-  'Salt Lake, Kolkata': { latitude: 22.5868, longitude: 88.4178 },
-};
+export interface PlacePrediction {
+  placeId: string;
+  description: string;
+  mainText: string;
+  secondaryText: string;
+}
 
-export const getCityCoordinates = (cityName: string): Coordinates => {
-  if (CITY_COORDINATES[cityName]) {
-    return CITY_COORDINATES[cityName];
-  }
-  // Default to Patna
-  return { latitude: 25.6022, longitude: 85.1376 };
-};
+const dynamicCoordinatesCache = new Map<string, Coordinates>();
 
-/**
- * Request OS Location Permission (Android / iOS)
- */
 export const requestLocationPermission = async (): Promise<boolean> => {
-  if (Platform.OS === 'ios') {
-    return true;
-  }
+  if (Platform.OS !== 'android') return true;
+  try {
+    const fine = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+    const coarse = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION);
+    if (fine || coarse) return true;
 
-  if (Platform.OS === 'android') {
-    try {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        {
-          title: 'GaadiMitra Location Access',
-          message:
-            'GaadiMitra needs your live GPS location to find nearby verified drivers and vehicles for quick ride booking.',
-          buttonNeutral: 'Ask Me Later',
-          buttonNegative: 'Cancel',
-          buttonPositive: 'Allow GPS',
-        }
-      );
-      return granted === PermissionsAndroid.RESULTS.GRANTED;
-    } catch (err) {
-      console.warn('Location permission request error:', err);
-      return false;
-    }
+    const res = await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+    ]);
+    return (
+      res[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED ||
+      res[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED
+    );
+  } catch {
+    return false;
   }
-
-  return false;
 };
 
-/**
- * Reverse Geocode GPS coordinates using Google Geocoding API with MAP_KEY
- */
 export const reverseGeocodeCoordinates = async (
   latitude: number,
   longitude: number
 ): Promise<GeocodedAddress> => {
   try {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`;
-    const response = await fetch(url);
-    const data = await response.json();
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
+    );
+    const data = await res.json();
+    if (data.status === 'OK' && data.results?.[0]) {
+      const first = data.results[0];
+      const comps = first.address_components || [];
+      const getVal = (...types: string[]) =>
+        comps.find((c: any) => types.some((t) => c.types.includes(t)))?.long_name || '';
 
-    if (data.status === 'OK' && data.results && data.results.length > 0) {
-      const firstResult = data.results[0];
-      const components = firstResult.address_components || [];
+      const sub = getVal('sublocality_level_1', 'sublocality', 'neighborhood');
+      const loc = getVal('locality', 'administrative_area_level_2');
+      const state = getVal('administrative_area_level_1');
+      const shortLocation =
+        sub && loc && sub !== loc ? `${sub}, ${loc}` : sub || loc || state || 'Current Location';
 
-      let sublocality = '';
-      let locality = '';
-      let administrativeArea = '';
-      let postalCode = '';
-
-      for (const comp of components) {
-        const types: string[] = comp.types || [];
-        if (types.includes('sublocality') || types.includes('neighborhood')) {
-          sublocality = comp.long_name;
-        } else if (types.includes('locality')) {
-          locality = comp.long_name;
-        } else if (types.includes('administrative_area_level_1')) {
-          administrativeArea = comp.long_name;
-        } else if (types.includes('postal_code')) {
-          postalCode = comp.long_name;
-        }
-      }
-
-      const primaryArea = sublocality || locality || 'Current Location';
-      const cityOrState = locality || administrativeArea || 'Patna';
-      const shortLocation = `${primaryArea}, ${cityOrState}`;
-
-      return {
-        fullAddress: firstResult.formatted_address || shortLocation,
+      const result: GeocodedAddress = {
+        fullAddress: first.formatted_address || shortLocation,
         shortLocation,
-        city: locality || cityOrState,
-        state: administrativeArea,
-        postalCode,
+        city: loc,
+        state,
+        postalCode: getVal('postal_code'),
         coordinates: { latitude, longitude },
       };
+
+      dynamicCoordinatesCache.set(shortLocation.toLowerCase(), { latitude, longitude });
+      storageService.setObject('user_selected_coords', { latitude, longitude });
+      return result;
     }
-  } catch (error) {
-    console.warn('Google Reverse Geocoding API error:', error);
+  } catch (err) {
+    console.warn('Reverse geocode error:', err);
   }
 
-  // Fallback if network/offline
   return {
-    fullAddress: 'Patna Junction, Patna, Bihar, India',
-    shortLocation: 'Patna Junction, Patna',
-    city: 'Patna',
-    state: 'Bihar',
+    fullAddress: 'Current Location',
+    shortLocation: 'Current Location',
+    city: '',
+    state: '',
     coordinates: { latitude, longitude },
   };
 };
 
-/**
- * Get device current location with GPS permission check and reverse geocoding
- */
 export const detectCurrentLocationWithGps = async (): Promise<GeocodedAddress> => {
-  const hasPermission = await requestLocationPermission();
+  await requestLocationPermission();
 
-  return new Promise((resolve) => {
-    const nav = (typeof globalThis !== 'undefined' ? (globalThis as any) : {}) as any;
-    if (hasPermission && nav && nav.navigator && nav.navigator.geolocation) {
-      nav.navigator.geolocation.getCurrentPosition(
-        async (pos: { coords: { latitude: number; longitude: number } }) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          const address = await reverseGeocodeCoordinates(lat, lng);
-          resolve(address);
-        },
-        async (error: any) => {
-          console.warn('GPS position error, using default Patna coords:', error);
-          const defaultCoords = { latitude: 25.6022, longitude: 85.1376 };
-          const address = await reverseGeocodeCoordinates(defaultCoords.latitude, defaultCoords.longitude);
-          resolve(address);
-        },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
-      );
-    } else {
-      // Fallback to default
-      const defaultCoords = { latitude: 25.6022, longitude: 85.1376 };
-      reverseGeocodeCoordinates(defaultCoords.latitude, defaultCoords.longitude).then(resolve);
+  // 1. Primary: react-native-geolocation-service
+  try {
+    const pos = await new Promise<GeoPosition>((resolve, reject) => {
+      Geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 10000,
+        forceRequestLocation: true,
+        showLocationDialog: true,
+      });
+    });
+
+    if (pos?.coords) {
+      return reverseGeocodeCoordinates(pos.coords.latitude, pos.coords.longitude);
     }
-  });
+  } catch (err) {
+    console.warn('Geolocation service error, trying native module:', err);
+  }
+
+  // 2. Secondary fallback: Native DeviceLocationModule
+  if (NativeModules?.DeviceLocationModule?.getCurrentPosition) {
+    try {
+      const pos = await NativeModules.DeviceLocationModule.getCurrentPosition();
+      if (pos?.latitude && pos?.longitude) {
+        return reverseGeocodeCoordinates(pos.latitude, pos.longitude);
+      }
+    } catch {}
+  }
+
+  // 3. Stored coordinates fallback
+  const saved = storageService.getObject<Coordinates>('user_selected_coords');
+  if (saved?.latitude && saved?.longitude) {
+    return reverseGeocodeCoordinates(saved.latitude, saved.longitude);
+  }
+
+  return {
+    fullAddress: 'Current Location',
+    shortLocation: 'Current Location',
+    city: '',
+    state: '',
+    coordinates: { latitude: 0, longitude: 0 },
+  };
 };
 
-/**
- * Builds Google Static Map URL with user location & driver markers
- */
-export const buildGoogleStaticMapUrl = (
-  center: Coordinates,
-  drivers: { latitude: number; longitude: number; label?: string }[],
-  zoom = 14,
-  width = 600,
-  height = 400
-): string => {
-  const baseUrl = 'https://maps.googleapis.com/maps/api/staticmap';
-  const sizeParam = `size=${width}x${height}&scale=2`;
-  const centerParam = `center=${center.latitude},${center.longitude}&zoom=${zoom}`;
-  const mapTypeParam = 'maptype=roadmap';
+export const searchPlacesWithGoogle = async (query: string): Promise<PlacePrediction[]> => {
+  if (!query || query.trim().length < 2) return [];
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+        query.trim()
+      )}&components=country:in&key=${GOOGLE_MAPS_API_KEY}`
+    );
+    const data = await res.json();
+    if (data.status === 'OK' && Array.isArray(data.predictions)) {
+      return data.predictions.map((p: any) => ({
+        placeId: p.place_id,
+        description: p.description,
+        mainText: p.structured_formatting?.main_text || p.description,
+        secondaryText: p.structured_formatting?.secondary_text || '',
+      }));
+    }
+  } catch {}
+  return [];
+};
 
-  // User location marker (Blue)
-  const userMarker = `markers=color:blue%7Clabel:U%7C${center.latitude},${center.longitude}`;
+export const getPlaceCoordinates = async (
+  placeId: string,
+  fallbackAddress?: string
+): Promise<Coordinates | null> => {
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?place_id=${encodeURIComponent(
+        placeId
+      )}&key=${GOOGLE_MAPS_API_KEY}`
+    );
+    const data = await res.json();
+    if (data.status === 'OK' && data.results?.[0]?.geometry?.location) {
+      const { lat, lng } = data.results[0].geometry.location;
+      const coords = { latitude: lat, longitude: lng };
+      if (fallbackAddress) dynamicCoordinatesCache.set(fallbackAddress.trim().toLowerCase(), coords);
+      storageService.setObject('user_selected_coords', coords);
+      return coords;
+    }
+  } catch {}
 
-  // Drivers markers (Red/Orange)
-  const driverMarkers = drivers
-    .map(
-      (d, i) =>
-        `markers=color:red%7Clabel:${d.label || (i + 1)}%7C${d.latitude},${d.longitude}`
-    )
-    .join('&');
+  return fallbackAddress ? geocodeAddress(fallbackAddress) : null;
+};
 
-  const keyParam = `key=${GOOGLE_MAPS_API_KEY}`;
+export const geocodeAddress = async (address: string): Promise<Coordinates | null> => {
+  if (!address?.trim()) return null;
+  const key = address.trim().toLowerCase();
+  if (dynamicCoordinatesCache.has(key)) return dynamicCoordinatesCache.get(key)!;
 
-  return `${baseUrl}?${centerParam}&${sizeParam}&${mapTypeParam}&${userMarker}&${driverMarkers}&${keyParam}`;
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+        address
+      )}&key=${GOOGLE_MAPS_API_KEY}`
+    );
+    const data = await res.json();
+    if (data.status === 'OK' && data.results?.[0]?.geometry?.location) {
+      const { lat, lng } = data.results[0].geometry.location;
+      const coords = { latitude: lat, longitude: lng };
+      dynamicCoordinatesCache.set(key, coords);
+      storageService.setObject('user_selected_coords', coords);
+      return coords;
+    }
+  } catch {}
+
+  return null;
+};
+
+export const getCityCoordinates = (cityName: string): Coordinates => {
+  if (cityName) {
+    const cached = dynamicCoordinatesCache.get(cityName.trim().toLowerCase());
+    if (cached) return cached;
+  }
+  const saved = storageService.getObject<Coordinates>('user_selected_coords');
+  if (saved?.latitude && saved?.longitude) return saved;
+  return { latitude: 28.6139, longitude: 77.209 };
 };

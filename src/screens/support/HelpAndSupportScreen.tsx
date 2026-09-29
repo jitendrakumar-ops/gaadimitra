@@ -5,7 +5,6 @@ import {
   StatusBar,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,12 +24,19 @@ import {
 } from '../../assets/icons/Icons';
 import { HeaderBar } from '../../components/common/HeaderBar';
 import { useTheme } from '../../theme';
+import { confirmDialog } from '../../components/common/CustomAlertModal';
 
 interface HelpCategory {
   id: string;
   title: string;
   icon: (color: string) => React.ReactNode;
   description: string;
+}
+
+interface FaqItem {
+  id: string;
+  question: string;
+  answer: string;
 }
 
 export const HelpAndSupportScreen: React.FC = () => {
@@ -40,73 +46,55 @@ export const HelpAndSupportScreen: React.FC = () => {
 
   const helpCategories: HelpCategory[] = [
     {
-      id: 'ride_issue',
-      title: 'Ride Issue',
+      id: 'ride_issues',
+      title: 'Ride & Trip Issues',
       icon: (c) => <CarFrontIcon size={32} color={c} />,
-      description: 'Route delay, car breakdown, or cancellation dispute.',
+      description: 'Route disputes, driver delays, or vehicle condition problems.',
     },
     {
-      id: 'driver_issue',
-      title: 'Driver Issue',
-      icon: (c) => <UserSingleIcon size={32} color={c} />,
-      description: 'Driver behavior, punctuality, or vehicle cleanliness.',
-    },
-    {
-      id: 'safety_issue',
-      title: 'Safety Issue',
-      icon: (c) => <ShieldCheckAltIcon size={32} color={c} />,
-      description: '24x7 SOS emergency, rash driving, or safety concerns.',
-    },
-    {
-      id: 'fare_issue',
-      title: 'Fare Issue',
+      id: 'payments',
+      title: 'Payments & Fare',
       icon: (c) => <RupeeCircleIcon size={32} color={c} />,
-      description: 'Overcharging, agreed price dispute, or extra toll charges.',
+      description: 'Extra charges, fare calculation, or payment method queries.',
     },
     {
-      id: 'calling_issue',
-      title: 'Calling Issue',
-      icon: (c) => <PhoneCallWaveIcon size={32} color={c} />,
-      description: 'Unable to connect with driver via call or phone busy.',
+      id: 'safety',
+      title: 'Safety & Emergency',
+      icon: (c) => <ShieldCheckAltIcon size={32} color={c} />,
+      description: 'Report misconduct, lost items, or security concerns.',
     },
     {
-      id: 'account_issue',
-      title: 'Account Issue',
+      id: 'account',
+      title: 'Account & App',
       icon: (c) => <UserCircleIcon size={32} color={c} />,
       description: 'Profile updates, OTP verification, or privacy settings.',
     },
   ];
 
   const handleCategoryPress = (cat: HelpCategory) => {
-    Alert.alert(
-      cat.title,
-      `${cat.description}\n\nWould you like to connect with a GaadiMitra support executive?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call Support',
-          onPress: () => {
-            Linking.openURL('tel:18001234567').catch(() => {});
-          },
-        },
-      ]
-    );
+    confirmDialog.show({
+      title: cat.title,
+      message: `${cat.description}\n\nWould you like to connect with a GaadiMitra support executive?`,
+      confirmText: 'Call Support',
+      cancelText: 'Cancel',
+      icon: 'phone',
+      onConfirm: () => {
+        Linking.openURL('tel:18001234567').catch(() => {});
+      },
+    });
   };
 
   const handleContactSupport = () => {
-    Alert.alert(
-      'GaadiMitra 24x7 Support',
-      'Need instant assistance with your ride?\n\nHelpline: 1800-123-4567\nEmail: support@gaadimitra.com',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call Helpline',
-          onPress: () => {
-            Linking.openURL('tel:18001234567').catch(() => {});
-          },
-        },
-      ]
-    );
+    confirmDialog.show({
+      title: 'GaadiMitra 24x7 Support',
+      message: 'Need instant assistance with your ride?\n\nHelpline: 1800-123-4567\nEmail: support@gaadimitra.com',
+      confirmText: 'Call Helpline',
+      cancelText: 'Cancel',
+      icon: 'phone',
+      onConfirm: () => {
+        Linking.openURL('tel:18001234567').catch(() => {});
+      },
+    });
   };
 
   const toggleFaq = (faqId: string) => {
