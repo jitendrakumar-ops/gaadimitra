@@ -33,8 +33,17 @@ import { CheckCircleIcon, LockFilledIcon, CarBadgeIcon, ClockOutlineIcon, CrossC
 import { useTheme } from '../../theme';
 import { ridesService } from '../../services/rides';
 import { bookingService } from '../../services/bookingService';
+import { driverService } from '../../services/driverService';
 import { notificationService } from '../../services/notificationService';
-import { useAppDispatch, useAppSelector, setActiveRide, updateActiveRideStatus, cancelBooking, payBookingToken } from '../../store';
+import {
+  useAppDispatch,
+  useAppSelector,
+  setActiveRide,
+  setSelectedDriver,
+  updateActiveRideStatus,
+  cancelBooking,
+  payBookingToken,
+} from '../../store';
 import { toast } from '../../components/common/ToastNotification';
 
 const CANCEL_REASONS = [
@@ -72,6 +81,9 @@ export const DriverAcceptedScreen: React.FC = () => {
     currentStatus !== 'rejected';
 
   const pulseAnimation = useRef(new Animated.Value(0)).current;
+  const currentStatusRef = useRef(currentStatus);
+  const requestedBookingIdsRef = useRef(new Set<string>());
+  const requestedDriverIdsRef = useRef(new Set<string>());
 
   const { selectedDriver } = useAppSelector((state) => state.drivers);
   const { activeBooking, currentBooking } = useAppSelector((state) => state.bookings);
@@ -87,69 +99,9 @@ export const DriverAcceptedScreen: React.FC = () => {
 
   const driver: DriverInfo | null = React.useMemo(() => {
     // 1. Check if backend returned populated driver in live booking
-    const backendDriver =
-      typeof liveBookingData?.driverId === 'object' && liveBookingData?.driverId !== null
-        ? liveBookingData.driverId
-        : null;
+ 
 
-    if (backendDriver) {
-      const vehicle = typeof backendDriver.vehicleId === 'object' ? backendDriver.vehicleId : null;
-      const vehicleImg =
-        backendDriver.vehicleImage ||
-        (Array.isArray(backendDriver.vehicleImages) && backendDriver.vehicleImages.length > 0 ? backendDriver.vehicleImages[0] : null) ||
-        vehicle?.image ||
-        (typeof backendDriver.driverVehicleImg === 'string' ? backendDriver.driverVehicleImg : null);
-
-      return {
-        id: backendDriver._id || backendDriver.id || '',
-        name: backendDriver.name || backendDriver.userId?.name || 'Driver Partner',
-        phone: backendDriver.phone || backendDriver.userId?.phone || '',
-        profileImage: backendDriver.profileImage || backendDriver.userId?.profileImage || null,
-        rating: backendDriver.rating !== undefined ? Number(backendDriver.rating).toFixed(1) : '5.0',
-        totalRides: backendDriver.totalTripsCount ?? backendDriver.totalRides ?? 0,
-        experienceYears: backendDriver.experienceYears ?? 0,
-        distance: backendDriver.distanceKm ? `${backendDriver.distanceKm} km away` : 'Nearby',
-        isVerified: Boolean(backendDriver.isVerified ?? true),
-        vehicleModel: backendDriver.vehicleModel || vehicle?.model || vehicle?.name || backendDriver.vehicleType || 'Vehicle',
-        vehicleType: backendDriver.type || vehicle?.type || backendDriver.vehicleType || 'Car',
-        vehiclePlate: backendDriver.vehicleNo || backendDriver.vehiclePlate || 'Not Registered',
-        hasAc: Boolean(backendDriver.type),
-        seatingCapacity: backendDriver.seating ?? `${backendDriver.seating || 4} Seats`,
-        driverVehicleImg: backendDriver.vehicleImages,
-        vehicleImage: vehicleImg,
-      };
-    }
-
-    if (route.params?.driver) {
-      const d = route.params.driver as any;
-      const vehicle = typeof d.vehicleId === 'object' ? d.vehicleId : null;
-      const vehicleImg =
-        d.vehicleImage ||
-        (Array.isArray(d.vehicleImages) && d.vehicleImages.length > 0 ? d.vehicleImages[0] : null) ||
-        (Array.isArray(d.driverVehicleImg) && d.driverVehicleImg.length > 0 ? d.driverVehicleImg[0] : null) ||
-        vehicle?.image ||
-        (typeof d.driverVehicleImg === 'string' ? d.driverVehicleImg : null);
-
-      return {
-        ...d,
-        id: d.id || d._id || '',
-        name: d.name || d.userId?.name || '',
-        phone: d.phone || d.userId?.phone || '',
-        profileImage: d.profileImage || d.userId?.profileImage || null,
-        rating: d.rating !== undefined ? Number(d.rating).toFixed(1) : '5.0',
-        totalRides: d.totalTripsCount ?? d.totalRides ?? 0,
-        experienceYears: d.experienceYears ?? 0,
-        distance: d.distanceKm ? `${d.distanceKm} km away` : 'Nearby',
-        isVerified: Boolean(d.isVerified ?? true),
-        vehicleModel: d.vehicleModel || vehicle?.model || vehicle?.name || d.vehicleType || 'Vehicle',
-        vehicleType: d.type || vehicle?.type || d.vehicleType || '',
-        vehiclePlate: d.vehiclePlate || d.vehicleNo || 'Not Registered',
-        hasAc: Boolean(d.type),
-        seatingCapacity: d.seating ?? `${d.seating} Seats`,
-        driverVehicleImg: d.vehicleImages || d.driverVehicleImg,
-        vehicleImage: vehicleImg,
-      };
-    }
+   
     if (selectedDriver) {
       const vehicle = typeof selectedDriver.vehicleId === 'object' ? selectedDriver.vehicleId : null;
       return {
@@ -157,6 +109,7 @@ export const DriverAcceptedScreen: React.FC = () => {
         name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
         phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
         profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
+        pin: selectedDriver.userId?.pin || (selectedDriver as any).pin || '',
         rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
         totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
         experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,
@@ -178,11 +131,7 @@ export const DriverAcceptedScreen: React.FC = () => {
 
   const agreedFare = route.params?.agreedFare || liveBookingData?.fare || 0;
   const bookingToken =
-    route.params?.bookingToken ||
-    liveBookingData?.tokenMoney ||
-    liveBookingData?.bookingToken ||
-    liveBookingData?.advanceAmount ||
-    200;
+    liveBookingData?.tokenMoney;
   const name = route.params?.name;
   const phone = route.params?.phone;
 
@@ -196,7 +145,16 @@ export const DriverAcceptedScreen: React.FC = () => {
   };
 
   const driverFirstName = driver?.name?.split(' ')[0] || 'Driver';
+  const driverFirstNameRef = useRef(driverFirstName);
   const remainingFare = Math.max(0, agreedFare - bookingToken);
+
+  useEffect(() => {
+    currentStatusRef.current = currentStatus;
+  }, [currentStatus]);
+
+  useEffect(() => {
+    driverFirstNameRef.current = driverFirstName;
+  }, [driverFirstName]);
 
   // Navigate directly to Home
   const handleGoHome = useCallback(() => {
@@ -215,7 +173,6 @@ export const DriverAcceptedScreen: React.FC = () => {
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
   }, [handleGoHome]);
-
   const handleCancelRequest = () => {
     setShowCancelModal(true);
   };
@@ -392,11 +349,11 @@ export const DriverAcceptedScreen: React.FC = () => {
       const st = (b?.status || '').toLowerCase();
       if (!st) return;
 
-      setLiveBookingData(b);
+      setLiveBookingData((current: any) => ({ ...(current || {}), ...b }));
 
-      if (st !== currentStatus) {
+      if (st !== currentStatusRef.current) {
         if (__DEV__) {
-          console.log(`🚕 [DriverAcceptedScreen] Status updated from "${currentStatus}" to "${st}"`);
+          console.log(`🚕 [DriverAcceptedScreen] Status updated from "${currentStatusRef.current}" to "${st}"`);
         }
         setCurrentStatus(st);
         ridesService.updateRideStatus(bookingId, st as any);
@@ -404,7 +361,7 @@ export const DriverAcceptedScreen: React.FC = () => {
 
         if (st === 'accepted') {
           toast.showSuccess(
-            `${driverFirstName} has accepted your ride request! Complete token payment to confirm.`,
+            `${driverFirstNameRef.current} has accepted your ride request! Complete token payment to confirm.`,
             'Driver Accepted! 🎉',
             5000
           );
@@ -413,67 +370,103 @@ export const DriverAcceptedScreen: React.FC = () => {
         }
       }
     },
-    [currentStatus, bookingId, dispatch, driverFirstName]
+    [bookingId, dispatch]
   );
 
   const checkBookingStatus = useCallback(async () => {
     const idToFetch = rawBookingId;
-    if (idToFetch && !idToFetch.startsWith('#')) {
-      try {
-        const res = await bookingService.getBookingById(idToFetch);
-        const b = res?.booking || res?.data || res;
-        if (b && b.status) {
-          handleStatusUpdate(b);
-          return;
-        }
-      } catch (err) {
-        if (__DEV__) {
-          console.log('Error checking booking status by ID:', err);
-        }
-      }
-    }
+    if (!idToFetch || idToFetch.startsWith('#') || requestedBookingIdsRef.current.has(idToFetch)) return;
+    requestedBookingIdsRef.current.add(idToFetch);
 
-    // Fallback: check active booking
     try {
-      const activeRes = await bookingService.getActiveBooking();
-      const b = activeRes?.data || activeRes;
-      if (b && b.status) {
-        handleStatusUpdate(b);
+      const res = await bookingService.getBookingById(idToFetch);
+      const b = res?.booking || res?.data || res;
+      if (!b?.status) return;
+
+      handleStatusUpdate(b);
+
+      const driverIdToFetch = typeof b.driverId === 'object'
+        ? b.driverId?._id || b.driverId?.id
+        : b.driverId;
+
+      if (!driverIdToFetch || requestedDriverIdsRef.current.has(driverIdToFetch)) return;
+      requestedDriverIdsRef.current.add(driverIdToFetch);
+
+      try {
+        const driverRes = await driverService.getDriverById(driverIdToFetch);
+        const driverUser: Record<string, any> = driverRes?.userId || {};
+        const bookingUser: Record<string, any> = b?.userId || {};
+        const userId = {
+          ...(driverUser._id || bookingUser._id ? { _id: driverUser._id || bookingUser._id } : {}),
+          ...(driverUser.id || bookingUser.id || driverUser._id || bookingUser._id
+            ? { id: driverUser.id || bookingUser.id || driverUser._id || bookingUser._id }
+            : {}),
+          name: driverUser.name || bookingUser.name || 'Driver Partner',
+          phone: driverUser.phone || bookingUser.phone || '',
+          profileImage: driverUser.profileImage || bookingUser.profileImage || null,
+          pin: driverUser.pin ?? bookingUser.pin ?? driverRes?.pin ?? b?.pin ?? '',
+          experienceYears: driverUser.experienceYears ?? bookingUser.experienceYears ?? null,
+        };
+
+        dispatch(setSelectedDriver({
+          ...(driverRes || {}),
+          _id: driverRes?._id || driverIdToFetch,
+          id: driverRes?.id || driverIdToFetch,
+          pin: driverRes?.pin ?? driverUser.pin ?? bookingUser.pin ?? b?.pin ?? '',
+          userId,
+          vehicleId: driverRes?.vehicleId || b?.vehicleId || null,
+          vehicleModel: driverRes?.vehicleModel || b?.driverId?.vehicleModel || b?.vehicleId?.title || 'Vehicle',
+          vehicleNo: driverRes?.vehicleNo || b?.driverId?.vehicleNo || 'Not Registered',
+          rating: driverRes?.rating ?? b?.driverId?.rating ?? 5,
+          seating: driverRes?.seating ?? b?.vehicleId?.seat ?? null,
+          type: driverRes?.type || b?.vehicleId?.type || '',
+          vehicleImages: driverRes?.vehicleImages || (b?.vehicleId?.image ? [b.vehicleId.image] : []),
+        }));
+      } catch (driverErr) {
+        if (__DEV__) {
+          console.log('Error fetching driver profile by driverId:', driverErr);
+        }
       }
     } catch (err) {
-      // ignore
+      if (__DEV__) {
+        console.log('Error checking booking status by ID:', err);
+      }
     }
   }, [rawBookingId, handleStatusUpdate]);
 
   // Initial check on mount
   useEffect(() => {
+    if (!rawBookingId || rawBookingId.startsWith('#')) return;
     checkBookingStatus();
-  }, [checkBookingStatus]);
+  }, [rawBookingId, checkBookingStatus]);
 
-  // Real-time polling every 3 seconds while waiting for driver acceptance
-  useEffect(() => {
-    if (isDriverAccepted) return;
-
-    const interval = setInterval(() => {
-      checkBookingStatus();
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [isDriverAccepted, checkBookingStatus]);
-
-  // Immediate push notification reaction
   useEffect(() => {
     const unsubscribe = notificationService.addListener((remoteMessage) => {
-      if (__DEV__) {
-        console.log('🔔 [DriverAcceptedScreen] Push notification received on screen:', remoteMessage);
-      }
-      checkBookingStatus();
+      const data = remoteMessage.data || {};
+      const type = String(data.type || '').toLowerCase();
+      const status = String(data.status || '').toLowerCase();
+      const title = remoteMessage.notification?.title || String(data.title || '');
+      const body = remoteMessage.notification?.body || String(data.body || data.message || '');
+      const isAccepted =
+        type === 'booking_accepted' ||
+        type === 'driver_accepted' ||
+        status === 'accepted' ||
+        title.toLowerCase().includes('accept') ||
+        body.toLowerCase().includes('accept');
+
+      if (!isAccepted) return;
+
+      const notificationBookingId = String(data.bookingId || data.booking_id || '');
+      if (notificationBookingId && notificationBookingId !== rawBookingId) return;
+
+      handleStatusUpdate({
+        status: status || 'accepted',
+        bookingId: notificationBookingId || rawBookingId,
+      });
     });
 
-    return () => {
-      unsubscribe();
-    };
-  }, [checkBookingStatus]);
+    return unsubscribe;
+  }, [handleStatusUpdate, rawBookingId]);
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -856,7 +849,7 @@ export const DriverAcceptedScreen: React.FC = () => {
       </SafeAreaView>
     );
   }
-
+console.log('🚕 [DriverAcceptedScreen] Rendering driver accepted screen with driver:', driver);
 
   return (
     <SafeAreaView style={{ backgroundColor: colors.background }} className="flex-1 justify-between">

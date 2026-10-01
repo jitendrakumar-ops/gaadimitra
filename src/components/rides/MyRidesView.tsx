@@ -71,8 +71,8 @@ export const MyRidesView: React.FC<MyRidesViewProps> = ({ onBookRidePress }) => 
   ];
 
   const handleCallDriver = (ride: any) => {
-    const phone = ride.userId?.phone || ride.driverId?.phone;
-    const name = ride.userId?.name || ride.driverId?.name || 'Driver';
+    const phone = ride.driverId.userId?.phone || ride.driverId?.phone;
+    const name = ride.driverId.userId?.name || ride.driverId?.name || 'Driver';
     if (!phone) return;
 
     confirmDialog.show({
@@ -204,9 +204,9 @@ export const MyRidesView: React.FC<MyRidesViewProps> = ({ onBookRidePress }) => 
               {/* Driver row */}
               <View className="flex-row items-center justify-between my-3">
                 <View className="flex-row items-center flex-1">
-                  {ride.userId?.profileImage ? (
+                  {ride?.driverId.userId?.profileImage ? (
                     <Image
-                      source={{ uri: ride.userId.profileImage }}
+                      source={{ uri: ride?.driverId.userId.profileImage }}
                       style={{ borderColor: colors.border, width: 44, height: 44, borderRadius: 22 }}
                       resizeMode="cover"
                     />
@@ -215,24 +215,24 @@ export const MyRidesView: React.FC<MyRidesViewProps> = ({ onBookRidePress }) => 
                       style={{ backgroundColor: `${colors.primary}15`, borderColor: colors.border, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1 }}
                     >
                       <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '800' }}>
-                        {ride.userId.name.charAt(0)}
+                        {ride?.driverId.userId.name.charAt(0)}
                       </Text>
                     </View>
                   )}
                   <View className="ml-3 flex-1">
-                    <Text style={{ color: colors.text }} className="text-sm font-extrabold">{ride.userId.name}</Text>
+                    <Text style={{ color: colors.text }} className="text-sm font-extrabold">{ride?.driverId.userId.name}</Text>
                     <View className="flex-row items-center mt-0.5">
                       <Text className="text-xs font-bold text-amber-500 mr-1">★</Text>
-                      <Text style={{ color: colors.text }} className="text-xs font-bold">{ride.driverId.rating}</Text>
-                      {ride.driverId.vehicleModel ? (
+                      <Text style={{ color: colors.text }} className="text-xs font-bold">{ride?.driverId.rating}</Text>
+                      {ride?.driverId.vehicleModel ? (
                         <Text style={{ color: colors.textSecondary }} className="text-xs font-semibold ml-2">
-                          • {ride.driverId.vehicleModel}
+                          • {ride?.driverId.vehicleModel}
                         </Text>
                       ) : null}
                     </View>
                   </View>
                 </View>
-                {ride.userId.phone ? (
+                {ride?.driverId.userId.phone ? (
                   <TouchableOpacity
                     activeOpacity={0.7}
                     onPress={() => handleCallDriver(ride)}

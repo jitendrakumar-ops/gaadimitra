@@ -19,6 +19,7 @@ export interface NearbyDriverUser {
   name: string;
   phone: string;
   profileImage?: string | null;
+  pin?: string;
   experienceYears?: number | null;
 }
 
@@ -43,6 +44,7 @@ export interface NearbyDriverVehicle {
 export interface NearbyDriverItem {
   _id: string;
   id?: string;
+  pin?: string;
   userId?: NearbyDriverUser;
   serviceId?: NearbyDriverService | string | null;
   vehicleId?: NearbyDriverVehicle | string | null;

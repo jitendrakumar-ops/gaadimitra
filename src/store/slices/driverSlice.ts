@@ -91,15 +91,37 @@ export const reportDriver = createAsyncThunk<
   }
 });
 
+const normalizeDriverPin = (driver: NearbyDriverItem | null | undefined): NearbyDriverItem | null => {
+  if (!driver) return null;
+
+  const apiPin = (driver as any)?.pin ?? (driver.userId as any)?.pin ?? (driver as any)?.user?.pin ?? '';
+  const userId = driver.userId ?? {} as any;
+  const normalizedUser: NearbyDriverItem['userId'] = {
+    _id: userId._id,
+    id: userId.id,
+    name: userId.name ?? 'Driver',
+    phone: userId.phone ?? '',
+    profileImage: userId.profileImage ?? null,
+    pin: (userId as any)?.pin ?? apiPin,
+    experienceYears: userId.experienceYears ?? null,
+  };
+
+  return {
+    ...driver,
+    pin: apiPin,
+    userId: normalizedUser,
+  };
+};
+
 export const driverSlice = createSlice({
   name: 'drivers',
   initialState,
   reducers: {
     setSelectedDriver: (state, action: PayloadAction<NearbyDriverItem | string | null>) => {
       if (typeof action.payload === 'string') {
-        state.selectedDriver = state.nearbyDrivers.find(d => (d._id || d.id) === action.payload) || null;
+        state.selectedDriver = normalizeDriverPin(state.nearbyDrivers.find(d => (d._id || d.id) === action.payload) || null);
       } else {
-        state.selectedDriver = action.payload;
+        state.selectedDriver = normalizeDriverPin(action.payload);
       }
     },
     setDriverMe: (state, action: PayloadAction<NearbyDriverItem | null>) => {
@@ -117,7 +139,7 @@ export const driverSlice = createSlice({
     });
     builder.addCase(fetchNearbyDrivers.fulfilled, (state, action: PayloadAction<NearbyDriverItem[]>) => {
       state.isLoading = false;
-      state.nearbyDrivers = action.payload;
+      state.nearbyDrivers = action.payload.map(normalizeDriverPin).filter(Boolean) as NearbyDriverItem[];
       state.lastFetchedAt = Date.now();
       state.error = null;
     });
@@ -148,7 +170,7 @@ export const driverSlice = createSlice({
     });
     builder.addCase(fetchDriverById.fulfilled, (state, action: PayloadAction<NearbyDriverItem>) => {
       state.isLoading = false;
-      state.selectedDriver = action.payload;
+      state.selectedDriver = normalizeDriverPin(action.payload);
       state.error = null;
     });
     builder.addCase(fetchDriverById.rejected, (state, action) => {

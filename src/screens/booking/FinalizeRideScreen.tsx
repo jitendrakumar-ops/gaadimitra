@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,10 +37,19 @@ import {
   searchPlacesWithGoogle,
   getPlaceCoordinates,
   geocodeAddress,
+  Coordinates,
   PlacePrediction,
 } from '../../utils/mapConfig';
 import { useTheme } from '../../theme';
 import { useAppSelector } from '../../store';
+
+const hasCoordinates = (coordinates: Coordinates | null | undefined) =>
+  Boolean(
+    coordinates &&
+    Number.isFinite(coordinates.latitude) &&
+    Number.isFinite(coordinates.longitude) &&
+    (coordinates.latitude !== 0 || coordinates.longitude !== 0)
+  );
 
 export const FinalizeRideScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
@@ -60,6 +69,7 @@ export const FinalizeRideScreen: React.FC = () => {
         name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
         phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
         profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
+        pin: selectedDriver.userId?.pin || (selectedDriver as any).pin || '',
         rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
         totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
         experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,
@@ -86,13 +96,52 @@ export const FinalizeRideScreen: React.FC = () => {
     incomingTripInfo?.pickupLocation || route.params?.selectedCity || ''
   );
   const [dropLocation, setDropLocation] = useState(incomingTripInfo?.destination || '');
-  const [pickupCoords, setPickupCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [dropCoords, setDropCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [pickupCoords, setPickupCoords] = useState<Coordinates | null>(route.params?.pickupCoords || null);
+  const [dropCoords, setDropCoords] = useState<Coordinates | null>(route.params?.dropCoords || null);
   const [locationType, setLocationType] = useState<'pickup' | 'drop' | null>(null);
   const [locationQuery, setLocationQuery] = useState('');
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
   const [placePredictions, setPlacePredictions] = useState<PlacePrediction[]>([]);
+  const pickupSelectionRef = useRef(false);
+  const pickupResolutionStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (hasCoordinates(route.params?.pickupCoords) || pickupResolutionStartedRef.current) return;
+    pickupResolutionStartedRef.current = true;
+    let isActive = true;
+
+    const resolvePickupCoordinates = async () => {
+      setIsDetectingLocation(true);
+      try {
+        const existingPickup = incomingTripInfo?.pickupLocation?.trim();
+        if (existingPickup) {
+          const coords = await geocodeAddress(existingPickup);
+          if (!isActive || pickupSelectionRef.current) return;
+          if (hasCoordinates(coords)) {
+            setPickupCoords(coords);
+            return;
+          }
+        }
+
+        if (!isActive || pickupSelectionRef.current) return;
+        const location = await detectCurrentLocationWithGps();
+        if (!isActive || pickupSelectionRef.current || !hasCoordinates(location.coordinates)) return;
+        setPickupLocation(location.shortLocation);
+        setPickupCoords(location.coordinates);
+      } catch (error) {
+        console.warn('Could not automatically resolve pickup coordinates:', error);
+      } finally {
+        if (isActive) setIsDetectingLocation(false);
+      }
+    };
+
+    void resolvePickupCoordinates();
+    return () => {
+      isActive = false;
+      pickupResolutionStartedRef.current = false;
+    };
+  }, [incomingTripInfo?.pickupLocation, route.params?.pickupCoords]);
 
   const agreedFare = parseInt(fareText, 10) || 0;
   const isFormValid = pickupLocation.trim().length > 0 && dropLocation.trim().length > 0 && agreedFare > 0;
@@ -128,11 +177,12 @@ export const FinalizeRideScreen: React.FC = () => {
 
   const selectLocation = (location: string, coords?: { latitude: number; longitude: number } | null) => {
     if (locationType === 'pickup') {
+      pickupSelectionRef.current = true;
       setPickupLocation(location);
-      if (coords) setPickupCoords(coords);
+      setPickupCoords(hasCoordinates(coords) ? coords! : null);
     } else {
       setDropLocation(location);
-      if (coords) setDropCoords(coords);
+      setDropCoords(hasCoordinates(coords) ? coords! : null);
     }
     closeLocationPicker();
   };
@@ -155,8 +205,16 @@ export const FinalizeRideScreen: React.FC = () => {
     }
   };
 
-  const handleConfirmRide = () => {
+  const handleConfirmRide = async () => {
     if (!isFormValid || !driver) {
+      return;
+    }
+
+    const resolvedPickupCoords = hasCoordinates(pickupCoords)
+      ? pickupCoords
+      : await geocodeAddress(pickupLocation.trim());
+    if (!resolvedPickupCoords || !hasCoordinates(resolvedPickupCoords)) {
+      toast.showError('Could not get pickup coordinates. Please select the pickup location again.', 'Location Error');
       return;
     }
 
@@ -174,7 +232,7 @@ export const FinalizeRideScreen: React.FC = () => {
         passengers: incomingTripInfo?.passengers || driver.seatingCapacity || '4 People',
         vehicleModel: driver.vehicleModel || 'Vehicle',
       },
-      pickupCoords: pickupCoords || undefined,
+      pickupCoords: resolvedPickupCoords,
       dropCoords: dropCoords || undefined,
       agreedFare,
       selectedCity: route.params?.selectedCity,

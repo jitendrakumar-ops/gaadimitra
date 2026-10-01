@@ -52,6 +52,7 @@ export const TripDetailsScreen: React.FC = () => {
         name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
         phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
         profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
+        pin: selectedDriver.userId?.pin || (selectedDriver as any).pin || '',
         rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
         totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
         experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,

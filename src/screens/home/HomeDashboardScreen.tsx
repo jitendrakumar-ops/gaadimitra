@@ -88,15 +88,17 @@ export const HomeDashboardScreen: React.FC = () => {
   );
 
 
+
   const handleOpenActiveRide = () => {
     if (!activeRide) return;
     const isPending = activeRide.status === 'pending' || activeRide.status === 'requested' || activeRide.status === 'accepted';
-    navigation.navigate(isPending ? 'DriverAccepted' : 'RideDetails', {
+    navigation.navigate(isPending ? 'DriverAccepted' : 'RideConfirmed', {
       bookingId: activeRide._id || activeRide.id || activeRide.bookingId,
       driver: activeRide.driverId || activeRide.driver,
       name: activeBooking.userId.name,
       phone: activeBooking.userId.phone,
-
+      userId: activeBooking.userId._id,
+      pin: activeBooking?.userId?.pin || activeRide?.userId?.pin || '',
       agreedFare: activeRide.fare || 0,
       bookingToken: activeRide.tokenMoney || 0,
       tripInfo: {

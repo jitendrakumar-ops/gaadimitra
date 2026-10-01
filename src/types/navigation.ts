@@ -9,6 +9,7 @@ export interface DriverInfo {
   avatarSeed?: string;
   avatarBg?: string;
   profileImage?: string | null;
+  pin?: string;
   rating: string;
   totalRides: number;
   experienceYears?: number;
@@ -84,6 +85,8 @@ export type RootStackParamList = {
     driver?: DriverInfo;
     selectedCity?: string;
     tripInfo?: TripInfoData;
+    pickupCoords?: { latitude: number; longitude: number };
+    dropCoords?: { latitude: number; longitude: number };
   };
 
   // Screen 15: Enter agreed fare
@@ -113,6 +116,7 @@ export type RootStackParamList = {
   // Screen 18: Ride confirmed
   RideConfirmed: {
     driver?: DriverInfo;
+    pin?: string;
     agreedFare?: number;
     tripInfo?: TripInfoData;
     bookingToken?: number;

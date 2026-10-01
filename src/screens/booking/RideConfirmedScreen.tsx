@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StatusBar, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -16,44 +16,97 @@ import { CheckCircleIcon, ArrowRightIcon } from '../../assets/icons/Icons';
 import { ridesService } from '../../services/rides';
 import { useTheme } from '../../theme';
 
-import { useAppSelector } from '../../store';
+import { useAppDispatch, useAppSelector, fetchDriverById, setSelectedDriver } from '../../store';
 
 export const RideConfirmedScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<RideConfirmedScreenNavigationProp>();
   const route = useRoute<RideConfirmedScreenRouteProp>();
+  const dispatch = useAppDispatch();
 
   const { selectedDriver } = useAppSelector((state) => state.drivers);
+  const routeDriver = route.params?.driver as any;
+  const requestedProfileIdsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (selectedDriver || !routeDriver || typeof routeDriver !== 'object') return;
+
+    const routeUser = routeDriver.userId && typeof routeDriver.userId === 'object'
+      ? routeDriver.userId
+      : {};
+    dispatch(setSelectedDriver({
+      ...routeDriver,
+      _id: routeDriver._id || routeDriver.id || '',
+      id: routeDriver.id || routeDriver._id || '',
+      pin: routeDriver.pin ?? routeUser.pin ?? '',
+      userId: {
+        ...routeUser,
+        name: routeUser.name || routeDriver.name || 'Driver Partner',
+        phone: routeUser.phone || routeDriver.phone || '',
+        profileImage: routeUser.profileImage || routeDriver.profileImage || null,
+        pin: routeUser.pin ?? routeDriver.pin ?? '',
+      },
+    } as any));
+  }, [dispatch, routeDriver, selectedDriver]);
+
+  useEffect(() => {
+    const source = selectedDriver || (routeDriver && typeof routeDriver === 'object' ? routeDriver : null);
+    if (!source) return;
+
+    const driverUser = source.userId && typeof source.userId === 'object' ? source.userId : null;
+    const hasUserProfile = Boolean(
+      (driverUser?.name && driverUser.name !== 'Driver Partner') ||
+      driverUser?.phone ||
+      driverUser?.profileImage
+    );
+    const driverId = source._id || source.id;
+    if (!driverId || hasUserProfile || requestedProfileIdsRef.current.has(driverId)) return;
+
+    requestedProfileIdsRef.current.add(driverId);
+    dispatch(fetchDriverById(driverId));
+  }, [dispatch, routeDriver, selectedDriver]);
 
   const driver: DriverInfo | null = React.useMemo(() => {
-    if (route.params?.driver) {
-      return route.params.driver;
-    }
-    if (selectedDriver) {
-      const vehicle = typeof selectedDriver.vehicleId === 'object' ? selectedDriver.vehicleId : null;
+    const source = selectedDriver || (routeDriver && typeof routeDriver === 'object' ? routeDriver : null);
+    if (source) {
+      if (!source.userId) {
+        return {
+          ...source,
+          id: source._id || source.id || '',
+          name: source.name || 'Driver Partner',
+          phone: source.phone || '',
+          profileImage: source.profileImage || null,
+          pin: route.params?.pin || source.pin || '',
+          vehiclePlate: source.vehiclePlate || source.vehicleNo || 'Not Registered',
+        } as DriverInfo;
+      }
+
+      const vehicle = typeof source.vehicleId === 'object' ? source.vehicleId : null;
       return {
-        id: selectedDriver._id || selectedDriver.id || '',
-        name: selectedDriver.userId?.name || (selectedDriver as any).name || 'Driver Partner',
-        phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || '',
-        profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || null,
-        rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : '5.0',
-        totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? 0,
-        experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? 0,
-        distance: selectedDriver.distanceKm ? `${selectedDriver.distanceKm} km away` : 'Nearby',
-        isVerified: Boolean(selectedDriver.isVerified ?? true),
-        vehicleModel: selectedDriver.vehicleModel || 'Vehicle',
-        vehicleType: selectedDriver.type || vehicle?.type || 'Car',
-        vehiclePlate: selectedDriver.vehicleNo || 'Not Registered',
-        hasAc: Boolean(selectedDriver.type),
-        seatingCapacity: selectedDriver.seating ?? `${selectedDriver.seating} Seats`,
-        driverVehicleImg: selectedDriver.vehicleImages,
-        vehicleImage: (selectedDriver.vehicleImages && selectedDriver.vehicleImages.length > 0)
-          ? selectedDriver.vehicleImages[0]
+        id: source._id || source.id || '',
+        name: source.userId?.name || (source as any).name || 'Driver Partner',
+        phone: source.userId?.phone || (source as any).phone || '',
+        profileImage: source.userId?.profileImage || (source as any).profileImage || null,
+        pin: route.params?.pin || source.userId?.pin || (source as any).pin || '',
+        rating: source.rating !== undefined ? Number(source.rating).toFixed(1) : '5.0',
+        totalRides: source.totalTripsCount ?? (source as any).totalRides ?? 0,
+        experienceYears: source.experienceYears ?? source.userId?.experienceYears ?? 0,
+        distance: source.distanceKm ? `${source.distanceKm} km away` : 'Nearby',
+        isVerified: Boolean(source.isVerified ?? true),
+        vehicleModel: source.vehicleModel || 'Vehicle',
+        vehicleType: source.type || vehicle?.type || 'Car',
+        vehiclePlate: source.vehicleNo || 'Not Registered',
+        hasAc: Boolean(source.type),
+        seatingCapacity: source.seating ?? `${source.seating} Seats`,
+        driverVehicleImg: source.vehicleImages,
+        vehicleImage: (source.vehicleImages && source.vehicleImages.length > 0)
+          ? source.vehicleImages[0]
           : (vehicle?.image || null),
       };
     }
     return null;
-  }, [route.params?.driver, selectedDriver]);
+  }, [route.params?.pin, routeDriver, selectedDriver]);
+
 
   const agreedFare = route.params?.agreedFare || 0;
   const bookingToken = route.params?.bookingToken || 0;
@@ -67,6 +120,8 @@ export const RideConfirmedScreen: React.FC = () => {
     passengers: driver?.seatingCapacity || '4 Seats',
     vehicleModel: driver?.vehicleModel || '',
   };
+
+  console.log('RideConfirmedScreen - driver:', driver,selectedDriver, route.params?.driver);
 
   useEffect(() => {
     if (driver) {
@@ -106,7 +161,7 @@ export const RideConfirmedScreen: React.FC = () => {
           barStyle={isDark ? 'light-content' : 'dark-content'}
           backgroundColor={colors.background}
         />
-        <HeaderBar onBackPress={() => navigation.goBack()} />
+        <HeaderBar onBackPress={handleGoToHome} />
         <View className="flex-1 items-center justify-center px-6">
           <Text style={{ color: colors.text }} className="text-base font-bold text-center">
             Ride confirmation information not available
@@ -132,7 +187,7 @@ export const RideConfirmedScreen: React.FC = () => {
       />
 
       {/* Top Navigation Bar */}
-      <HeaderBar onBackPress={() => navigation.goBack()} />
+      <HeaderBar onBackPress={handleGoToHome} />
 
       <ScrollView
         contentContainerStyle={{

@@ -73,6 +73,7 @@ export const DriverProfileScreen: React.FC = () => {
         name: selectedDriver.userId?.name || (selectedDriver as any).name || route.params?.driver?.name || 'Driver Partner',
         phone: selectedDriver.userId?.phone || (selectedDriver as any).phone || route.params?.driver?.phone || '',
         profileImage: selectedDriver.userId?.profileImage || (selectedDriver as any).profileImage || route.params?.driver?.profileImage || null,
+        pin: selectedDriver.userId?.pin || (selectedDriver as any).pin || route.params?.driver?.pin || '',
         rating: selectedDriver.rating !== undefined ? Number(selectedDriver.rating).toFixed(1) : (route.params?.driver?.rating || '5.0'),
         totalRides: selectedDriver.totalTripsCount ?? (selectedDriver as any).totalRides ?? route.params?.driver?.totalRides ?? 0,
         experienceYears: selectedDriver.experienceYears ?? selectedDriver.userId?.experienceYears ?? route.params?.driver?.experienceYears ?? 0,

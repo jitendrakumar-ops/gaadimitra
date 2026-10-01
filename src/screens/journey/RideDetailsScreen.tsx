@@ -71,7 +71,7 @@ export const RideDetailsScreen: React.FC = () => {
   }, [handleBack]);
 
   const handleCallDriver = () => {
-    const phone = selectedBooking?.userId?.phone;
+    const phone = selectedBooking?.driverId?.userId?.phone;
     if (!phone) return toast.showError('Driver phone number is not available.', 'Contact Unavailable');
     Linking.openURL(`tel:${phone}`).catch(() => toast.showError('Unable to initiate call.', 'Error'));
   };
@@ -134,18 +134,18 @@ export const RideDetailsScreen: React.FC = () => {
             <View style={{ backgroundColor: colors.card, borderColor: colors.border }} className="rounded-xl border p-4 mb-4">
               <View className="flex-row items-center justify-between">
                 <View className="flex-row items-center flex-1">
-                  {selectedBooking?.userId?.profileImage ? (
-                    <Image source={{ uri: selectedBooking.userId.profileImage }} style={{ width: 48, height: 48, borderRadius: 24 }} resizeMode="cover" />
+                  {selectedBooking?.driverId.userId?.profileImage ? (
+                    <Image source={{ uri: selectedBooking.driverId.userId.profileImage }} style={{ width: 48, height: 48, borderRadius: 24 }} resizeMode="cover" />
                   ) : (
                     <View style={{ backgroundColor: `${colors.primary}15`, width: 48, height: 48, borderRadius: 24 }} className="items-center justify-center">
                       <Text style={{ color: colors.primary }} className="text-lg font-bold">
-                        {(selectedBooking?.userId?.name || 'D').charAt(0).toUpperCase()}
+                        {(selectedBooking?.driverId.userId?.name || 'D').charAt(0).toUpperCase()}
                       </Text>
                     </View>
                   )}
                   <View className="ml-3 flex-1">
                     <Text style={{ color: colors.text }} className="text-base font-bold" numberOfLines={1}>
-                      {selectedBooking?.userId?.name || 'Driver Not Assigned'}
+                      {selectedBooking?.driverId.userId?.name || 'Driver Not Assigned'}
                     </Text>
                     {selectedBooking?.driverId?.rating && (
                       <View className="flex-row items-center mt-0.5">
@@ -155,7 +155,7 @@ export const RideDetailsScreen: React.FC = () => {
                     )}
                   </View>
                 </View>
-                {selectedBooking?.userId?.phone && (
+                {selectedBooking?.driverId.userId?.phone && (
                   <TouchableOpacity onPress={handleCallDriver} style={{ backgroundColor: `${colors.primary}15`, borderColor: `${colors.primary}40` }} className="w-10 h-10 rounded-full border items-center justify-center ml-2">
                     <PhoneIcon size={18} color={colors.primary} />
                   </TouchableOpacity>
@@ -257,7 +257,7 @@ export const RideDetailsScreen: React.FC = () => {
           {/* Action Buttons */}
           <View className="pt-2">
             <View className="flex-row items-center mb-3">
-              {selectedBooking?.userId?.phone && (
+              {selectedBooking?.driverId?.userId?.phone && (
                 <TouchableOpacity onPress={handleCallDriver} style={{ backgroundColor: colors.primary }} className="flex-1 py-3.5 px-4 rounded-xl flex-row items-center justify-center mr-2">
                   <PhoneIcon size={18} color="#FFFFFF" />
                   <Text className="text-white text-sm font-bold ml-2">Call Driver</Text>

@@ -17,16 +17,13 @@ interface DriverSummaryCardProps {
 
 export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
   driver,
-
   className = '',
 }) => {
   const { colors } = useTheme();
-  const { user } = useAppSelector((state) => state.auth);
-
+ 
   if (!driver) {
     return null;
   }
-
   return (
     <View
       style={{
@@ -40,7 +37,7 @@ export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
         <View className="mr-3">
           <DriverAvatarPortrait
             size={52}
-            imageUrl={driver.profileImage || user?.profileImage}
+            imageUrl={driver.profileImage}
             seed={driver.avatarSeed || '1'}
             bg={driver.avatarBg || '#EFF6FF'}
             showVerified={false}
@@ -48,17 +45,13 @@ export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
         </View>
 
         <View className="flex-1">
-          {/* Driver Name */}
-
-
           <Text
             style={{ color: colors.text }}
             className="text-base font-extrabold leading-tight"
           >
-            {user?.name}
+            {driver.name || 'Driver Partner'}
           </Text>
 
-          {/* Vehicle Model */}
           <Text
             style={{ color: colors.textSecondary }}
             className="text-xs font-medium mt-0.5"
@@ -66,7 +59,23 @@ export const DriverSummaryCard: React.FC<DriverSummaryCardProps> = ({
             {driver.vehicleModel}
           </Text>
 
-          {/* Verified Badge */}
+          {driver.pin ? (
+            <View
+              style={{
+                backgroundColor: '#FEF3C7',
+                borderColor: '#F59E0B',
+              }}
+              className="mt-1.5 self-start flex-row items-center rounded-md border px-2 py-1"
+            >
+              <Text className="text-[9px] font-extrabold uppercase tracking-wide text-amber-700 mr-1.5">
+                PIN
+              </Text>
+              <Text className="text-[11px] font-black text-amber-900">
+                {driver.pin}
+              </Text>
+            </View>
+          ) : null}
+
           {driver.isVerified && (
             <View className="flex-row items-center mt-1">
               <CheckCircleIcon size={12} color="#10B981" />
